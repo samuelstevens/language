@@ -46,19 +46,23 @@ from language.xsp.evaluation import restore_from_asql
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string(
-    'input_path', '',
-    'Path to under-specified predictions. Use trailing * to expand for sharded inputs.'
+    "input_path",
+    "",
+    "Path to under-specified predictions. Use trailing * to expand for sharded inputs.",
 )
-flags.DEFINE_string('output_path', '', 'Path to write restored predictions.')
-flags.DEFINE_string('spider_examples_json', '', 'Path to Spider json examples')
-flags.DEFINE_string('spider_tables_json', '', 'Path to Spider json tables.')
+flags.DEFINE_string("output_path", "", "Path to write restored predictions.")
+flags.DEFINE_string("spider_examples_json", "", "Path to Spider json examples")
+flags.DEFINE_string("spider_tables_json", "", "Path to Spider json tables.")
 
 
 def main(unused_argv):
-  restore_from_asql.restore_from_clauses(FLAGS.input_path, FLAGS.output_path,
-                                         FLAGS.spider_examples_json,
-                                         FLAGS.spider_tables_json)
+    restore_from_asql.restore_from_clauses(
+        FLAGS.input_path,
+        FLAGS.output_path,
+        FLAGS.spider_examples_json,
+        FLAGS.spider_tables_json,
+    )
 
 
-if __name__ == '__main__':
-  app.run(main)
+if __name__ == "__main__":
+    app.run(main)

@@ -35,88 +35,95 @@ from __future__ import print_function
 import sys
 
 with open(sys.argv[1]) as infile:
-  examples = infile.read().split('\n\n')
+    examples = infile.read().split("\n\n")
 
 num_exec_correct = 0
 num_filtered = 0
 for example in examples[:-1]:
 
-  # Filter out examples with empty gold tables.
-  if 'Gold table was EMPTY!' in example:
-    continue
+    # Filter out examples with empty gold tables.
+    if "Gold table was EMPTY!" in example:
+        continue
 
-  # Filter out examples with a result of [0] and that require a count.
-  if (example.endswith('Gold table:\n\t[0]') and
-      ('gold query:\n\tselect count' in example.lower() or
-       'gold query:\n\tselect distinct count' in example.lower())):
-    continue
+    # Filter out examples with a result of [0] and that require a count.
+    if example.endswith("Gold table:\n\t[0]") and (
+        "gold query:\n\tselect count" in example.lower()
+        or "gold query:\n\tselect distinct count" in example.lower()
+    ):
+        continue
 
-  # Filter out examples that require copying values that can't be copied.
-  prev_value = ''
-  example_lines = example.split('\n')
-  last_quote = ''
-  gold_query_idx = example_lines.index('Gold query:') + 1
-  utterance = example_lines[1]
-  copiable = True
-  in_equality = False
-  numerical_value = ''
-  handled_prefix = False
-  too_many_selects = False
-  gold_query = example_lines[gold_query_idx].strip()
+    # Filter out examples that require copying values that can't be copied.
+    prev_value = ""
+    example_lines = example.split("\n")
+    last_quote = ""
+    gold_query_idx = example_lines.index("Gold query:") + 1
+    utterance = example_lines[1]
+    copiable = True
+    in_equality = False
+    numerical_value = ""
+    handled_prefix = False
+    too_many_selects = False
+    gold_query = example_lines[gold_query_idx].strip()
 
-  for i, char in enumerate(gold_query):
-    # Check that it's only selecting a single table at the top
-    if (not handled_prefix and i - 4 >= 0 and
-        gold_query[i - 4:i].lower() == 'from'):
-      handled_prefix = True
-      if gold_query[:i].count(',') > 0:
-        too_many_selects = True
+    for i, char in enumerate(gold_query):
+        # Check that it's only selecting a single table at the top
+        if (
+            not handled_prefix
+            and i - 4 >= 0
+            and gold_query[i - 4 : i].lower() == "from"
+        ):
+            handled_prefix = True
+            if gold_query[:i].count(",") > 0:
+                too_many_selects = True
 
-    if char == last_quote:
-      last_quote = ''
+        if char == last_quote:
+            last_quote = ""
 
-      prev_value = prev_value.replace('%', '')
+            prev_value = prev_value.replace("%", "")
 
-      if prev_value not in utterance:
-        copiable = False
+            if prev_value not in utterance:
+                copiable = False
 
-      prev_value = ''
+            prev_value = ""
 
-    elif last_quote:
-      prev_value += char
-    elif char in {'"', '\''}:
-      last_quote = char
+        elif last_quote:
+            prev_value += char
+        elif char in {'"', "'"}:
+            last_quote = char
 
-    if char in {'=', '>', '<'}:
-      in_equality = True
+        if char in {"=", ">", "<"}:
+            in_equality = True
 
-    if in_equality:
-      if char.isdigit() or char == '.':
-        if numerical_value or (not prev_value and gold_query[i - 1] == ' '):
-          numerical_value += char
+        if in_equality:
+            if char.isdigit() or char == ".":
+                if numerical_value or (not prev_value and gold_query[i - 1] == " "):
+                    numerical_value += char
 
-      if char == ' ' and numerical_value:
-        in_equality = False
+            if char == " " and numerical_value:
+                in_equality = False
 
-        if numerical_value not in utterance and numerical_value not in {
-            '0', '1'
-        }:
-          # Allow generation of 0, 1 for compositionality purposes.
-          copiable = False
-        numerical_value = ''
+                if numerical_value not in utterance and numerical_value not in {
+                    "0",
+                    "1",
+                }:
+                    # Allow generation of 0, 1 for compositionality purposes.
+                    copiable = False
+                numerical_value = ""
 
-  if not copiable or too_many_selects:
-    continue
+    if not copiable or too_many_selects:
+        continue
 
-  num_filtered += 1
+    num_filtered += 1
 
-  if 'Execution was correct? True' in example:
-    num_exec_correct += 1
+    if "Execution was correct? True" in example:
+        num_exec_correct += 1
 
-  print(example + '\n')
+    print(example + "\n")
 
 print(
-    'Performance on subset: ' +
-    '{0:.2f}'.format(100. * num_exec_correct / num_filtered), num_exec_correct,
-    num_filtered)
-print('Filtered from %d to %d examples' % (len(examples) - 1, num_filtered))
+    "Performance on subset: "
+    + "{0:.2f}".format(100.0 * num_exec_correct / num_filtered),
+    num_exec_correct,
+    num_filtered,
+)
+print("Filtered from %d to %d examples" % (len(examples) - 1, num_filtered))

@@ -1,6 +1,6 @@
 {
   "data_options": {
-    "bert_vocab_path": "",
+    "bert_vocab_path": "xsp_experiment_run/assets/input_bert_vocabulary.txt",
     "max_num_tokens": 512,
     "max_decode_length": 100
   },

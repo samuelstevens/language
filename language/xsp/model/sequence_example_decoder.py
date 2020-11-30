@@ -19,7 +19,7 @@ import tf_slim as slim
 
 
 class TFSequenceExampleDecoder(slim.data_decoder.DataDecoder):
-  """A decoder for TensorFlow Examples.
+    """A decoder for TensorFlow Examples.
 
   Decoding Example proto buffers is comprised of two stages: (1) Example parsing
   and (2) tensor manipulation.
@@ -33,44 +33,47 @@ class TFSequenceExampleDecoder(slim.data_decoder.DataDecoder):
   contains the instructions for post_processing its tensors for stage 2.
   """
 
-  def __init__(self, context_keys_to_features, sequence_keys_to_features,
-               items_to_handlers):
-    """Constructs the TFSequenceExampleDecoder decoder."""
-    self._context_keys_to_features = context_keys_to_features
-    self._sequence_keys_to_features = sequence_keys_to_features
-    self._items_to_handlers = items_to_handlers
+    def __init__(
+        self, context_keys_to_features, sequence_keys_to_features, items_to_handlers
+    ):
+        """Constructs the TFSequenceExampleDecoder decoder."""
+        self._context_keys_to_features = context_keys_to_features
+        self._sequence_keys_to_features = sequence_keys_to_features
+        self._items_to_handlers = items_to_handlers
 
-  def list_items(self):
-    """See base class."""
-    return list(self._items_to_handlers.keys())
+    def list_items(self):
+        """See base class."""
+        return list(self._items_to_handlers.keys())
 
-  def decode(self, serialized_example, items=None):
-    """Decodes the given serialized TF-example."""
-    context, sequence = tf.parse_single_sequence_example(
-        serialized_example, self._context_keys_to_features,
-        self._sequence_keys_to_features)
+    def decode(self, serialized_example, items=None):
+        """Decodes the given serialized TF-example."""
+        context, sequence = tf.parse_single_sequence_example(
+            serialized_example,
+            self._context_keys_to_features,
+            self._sequence_keys_to_features,
+        )
 
-    # Merge context and sequence features
-    example = {}
-    example.update(context)
-    example.update(sequence)
+        # Merge context and sequence features
+        example = {}
+        example.update(context)
+        example.update(sequence)
 
-    all_features = {}
-    all_features.update(self._context_keys_to_features)
-    all_features.update(self._sequence_keys_to_features)
+        all_features = {}
+        all_features.update(self._context_keys_to_features)
+        all_features.update(self._sequence_keys_to_features)
 
-    # Reshape non-sparse elements just once:
-    for k, value in all_features.items():
-      if isinstance(value, tf.FixedLenFeature):
-        example[k] = tf.reshape(example[k], value.shape)
+        # Reshape non-sparse elements just once:
+        for k, value in all_features.items():
+            if isinstance(value, tf.FixedLenFeature):
+                example[k] = tf.reshape(example[k], value.shape)
 
-    if not items:
-      items = list(self._items_to_handlers.keys())
+        if not items:
+            items = list(self._items_to_handlers.keys())
 
-    outputs = []
-    for item in items:
-      handler = self._items_to_handlers[item]
-      keys_to_tensors = {key: example[key] for key in handler.keys}
-      outputs.append(handler.tensors_to_item(keys_to_tensors))
+        outputs = []
+        for item in items:
+            handler = self._items_to_handlers[item]
+            keys_to_tensors = {key: example[key] for key in handler.keys}
+            outputs.append(handler.tensors_to_item(keys_to_tensors))
 
-    return outputs
+        return outputs

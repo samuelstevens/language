@@ -28,26 +28,24 @@ Loss = collections.namedtuple("Loss", ["losses", "total_steps"])
 
 
 def _target_len_mask(targets, sequence_length):
-  # Mask out losses that are beyond the sequence length for each examples.
-  max_seq_len = tf.shape(targets)[1]
-  return tf.sequence_mask(
-      tf.to_int32(sequence_length), max_seq_len, dtype=tf.float32)
+    # Mask out losses that are beyond the sequence length for each examples.
+    max_seq_len = tf.shape(targets)[1]
+    return tf.sequence_mask(tf.to_int32(sequence_length), max_seq_len, dtype=tf.float32)
 
 
 def _positive_example_loss_mask(is_pos, target_len_mask):
-  # Expand dimension of tf.to_float(is_pos) so that it is broadcast for every
-  # time step.
-  return tf.expand_dims(tf.to_float(is_pos), 1) * target_len_mask
+    # Expand dimension of tf.to_float(is_pos) so that it is broadcast for every
+    # time step.
+    return tf.expand_dims(tf.to_float(is_pos), 1) * target_len_mask
 
 
 def _example_losses(logits, targets):
-  """Compute the loss for examples."""
-  return tf.nn.sparse_softmax_cross_entropy_with_logits(
-      labels=targets, logits=logits)
+    """Compute the loss for examples."""
+    return tf.nn.sparse_softmax_cross_entropy_with_logits(labels=targets, logits=logits)
 
 
 def sequence_loss(logits, targets, sequence_length, weights=None):
-  """Calculates the cross-entropy loss for examples.
+    """Calculates the cross-entropy loss for examples.
 
   Args:
     logits: A float32 Tensor of logits of shape [B, T, vocab_size], where T is
@@ -62,20 +60,19 @@ def sequence_loss(logits, targets, sequence_length, weights=None):
   Returns:
     A Loss tuple.
   """
-  with tf.name_scope("sequence_loss"):
-    target_len_mask = _target_len_mask(targets, sequence_length)
+    with tf.name_scope("sequence_loss"):
+        target_len_mask = _target_len_mask(targets, sequence_length)
 
-    losses = _example_losses(logits, targets)
+        losses = _example_losses(logits, targets)
 
-    if weights is not None:
-      # Expand dimension of weights so that it is broadcast for every time step.
-      weights = tf.expand_dims(weights, 1)
-      losses *= weights
+        if weights is not None:
+            # Expand dimension of weights so that it is broadcast for every time step.
+            weights = tf.expand_dims(weights, 1)
+            losses *= weights
 
-    total_steps = tf.reduce_sum(target_len_mask)
+        total_steps = tf.reduce_sum(target_len_mask)
 
-  with tf.name_scope("sequence_loss_components"):
-    tf.summary.scalar("avg_loss",
-                      tf.reduce_sum(losses) / total_steps)
+    with tf.name_scope("sequence_loss_components"):
+        tf.summary.scalar("avg_loss", tf.reduce_sum(losses) / total_steps)
 
-  return Loss(losses=losses, total_steps=total_steps)
+    return Loss(losses=losses, total_steps=total_steps)

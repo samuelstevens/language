@@ -24,35 +24,32 @@ import tensorflow.compat.v1.gfile as gfile
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string('data_dir', '',
-                    'The directory containing the input JSON files.')
+flags.DEFINE_string("data_dir", "", "The directory containing the input JSON files.")
 
-flags.DEFINE_list('input_filenames', None,
-                  'Which files to extract vocabulary from.')
+flags.DEFINE_list("input_filenames", None, "Which files to extract vocabulary from.")
 
-flags.DEFINE_string('output_path', '',
-                    'Location to save the output vocabulary.')
+flags.DEFINE_string("output_path", "", "Location to save the output vocabulary.")
 
 
 def main(unused_argv):
-  # Load the examples
-  vocabulary = set()
-  for filename in FLAGS.input_filenames:
-    if filename:
-      with gfile.Open(os.path.join(FLAGS.data_dir, filename)) as infile:
-        for line in infile:
-          if line:
-            gold_query = NLToSQLExample().from_json(
-                json.loads(line)).gold_sql_query
+    # Load the examples
+    vocabulary = set()
+    for filename in FLAGS.input_filenames:
+        if filename:
+            with gfile.Open(os.path.join(FLAGS.data_dir, filename)) as infile:
+                for line in infile:
+                    if line:
+                        gold_query = (
+                            NLToSQLExample().from_json(json.loads(line)).gold_sql_query
+                        )
 
-            for token in gold_query.actions:
-              if token.symbol:
-                vocabulary.add(token.symbol)
-  print('Writing vocabulary of size %d to %s' %
-        (len(vocabulary), FLAGS.output_path))
-  with gfile.Open(FLAGS.output_path, 'w') as ofile:
-    ofile.write('\n'.join(list(vocabulary)))
+                        for token in gold_query.actions:
+                            if token.symbol:
+                                vocabulary.add(token.symbol)
+    print("Writing vocabulary of size %d to %s" % (len(vocabulary), FLAGS.output_path))
+    with gfile.Open(FLAGS.output_path, "w") as ofile:
+        ofile.write("\n".join(list(vocabulary)))
 
 
-if __name__ == '__main__':
-  app.run(main)
+if __name__ == "__main__":
+    app.run(main)

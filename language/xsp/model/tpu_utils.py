@@ -25,13 +25,13 @@ from tensorflow.compat.v1 import summary
 
 
 def _tpu_summary_no_op(*args, **kwargs):
-  del args, kwargs  # Unused
-  tf.logging.warning("tf.summary.histogram is suppressed on TPU (b/64980426).")
+    del args, kwargs  # Unused
+    tf.logging.warning("tf.summary.histogram is suppressed on TPU (b/64980426).")
 
 
 @contextlib.contextmanager
 def rewire_summary_calls(use_tpu):
-  """Rewires histogram() to nop and scalar() to tpu_summary_scalar.
+    """Rewires histogram() to nop and scalar() to tpu_summary_scalar.
 
   Summaries are not yet supported on TPUs (b/64980426). So we provide this
   context manager that can swap out tf.summary.histogram
@@ -45,21 +45,21 @@ def rewire_summary_calls(use_tpu):
   Yields:
     None.
   """
-  # Store the original functions so we can put them back when the context ends.
-  if use_tpu:
-    original_tf_summary_scalar = tf.summary.scalar
-    original_tf_summary_histogram = tf.summary.histogram
-    original_summary_scalar = summary.scalar
-    original_summary_histogram = summary.histogram
+    # Store the original functions so we can put them back when the context ends.
+    if use_tpu:
+        original_tf_summary_scalar = tf.summary.scalar
+        original_tf_summary_histogram = tf.summary.histogram
+        original_summary_scalar = summary.scalar
+        original_summary_histogram = summary.histogram
 
-    tf.summary.scalar = summary.scalar = _tpu_summary_no_op
-    tf.summary.histogram = summary.histogram = _tpu_summary_no_op
-    try:
-      yield
-    finally:
-      tf.summary.scalar = original_tf_summary_scalar
-      tf.summary.histogram = original_tf_summary_histogram
-      summary.scalar = original_summary_scalar
-      summary.histogram = original_summary_histogram
-  else:
-    yield
+        tf.summary.scalar = summary.scalar = _tpu_summary_no_op
+        tf.summary.histogram = summary.histogram = _tpu_summary_no_op
+        try:
+            yield
+        finally:
+            tf.summary.scalar = original_tf_summary_scalar
+            tf.summary.histogram = original_tf_summary_histogram
+            summary.scalar = original_summary_scalar
+            summary.histogram = original_summary_histogram
+    else:
+        yield

@@ -18,30 +18,31 @@ import tensorflow.compat.v1 as tf
 
 
 def _sequence_correct(labels, predictions):
-  """Computes a per-example sequence accuracy."""
-  target_decode_steps = decode_utils.decode_steps_from_labels(
-      labels, trim_start_symbol=True)
-  predicted_decode_steps = decode_utils.decode_steps_from_predictions(
-      predictions)
+    """Computes a per-example sequence accuracy."""
+    target_decode_steps = decode_utils.decode_steps_from_labels(
+        labels, trim_start_symbol=True
+    )
+    predicted_decode_steps = decode_utils.decode_steps_from_predictions(predictions)
 
-  decode_utils.assert_shapes_match(target_decode_steps, predicted_decode_steps)
+    decode_utils.assert_shapes_match(target_decode_steps, predicted_decode_steps)
 
-  equal_tokens = decode_utils.compare_decode_steps(target_decode_steps,
-                                                   predicted_decode_steps)
-  target_len = labels["target_len"] - 1
-  loss_mask = tf.sequence_mask(
-      lengths=tf.to_int32(target_len),
-      maxlen=tf.to_int32(tf.shape(equal_tokens)[1]))
-  equal_tokens = tf.logical_or(equal_tokens, tf.logical_not(loss_mask))
-  all_equal = tf.cast(tf.reduce_all(equal_tokens, 1), tf.float32)
-  return all_equal
+    equal_tokens = decode_utils.compare_decode_steps(
+        target_decode_steps, predicted_decode_steps
+    )
+    target_len = labels["target_len"] - 1
+    loss_mask = tf.sequence_mask(
+        lengths=tf.to_int32(target_len), maxlen=tf.to_int32(tf.shape(equal_tokens)[1])
+    )
+    equal_tokens = tf.logical_or(equal_tokens, tf.logical_not(loss_mask))
+    all_equal = tf.cast(tf.reduce_all(equal_tokens, 1), tf.float32)
+    return all_equal
 
 
 def create_metrics_ops(labels, predictions):
-  """Creates metrics ops for evaluation."""
-  metric_ops = dict()
+    """Creates metrics ops for evaluation."""
+    metric_ops = dict()
 
-  sequence_correct = _sequence_correct(labels, predictions)
-  metric_ops["sequence_correct"] = tf.metrics.mean(sequence_correct)
+    sequence_correct = _sequence_correct(labels, predictions)
+    metric_ops["sequence_correct"] = tf.metrics.mean(sequence_correct)
 
-  return metric_ops
+    return metric_ops

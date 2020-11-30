@@ -24,7 +24,7 @@ import sqlparse
 
 
 def remove_bad_sqlparse_keywords():
-  """Removes keywords from the sqlparse keyword lists.
+    """Removes keywords from the sqlparse keyword lists.
 
   This is a relatively hacky solution (removing from the globally-scoped
   internal keyword lists) but sqlparse does not offer an API for controlling
@@ -35,27 +35,81 @@ def remove_bad_sqlparse_keywords():
 
   This fuction is designed to be safe if it is called more than once.
   """
-  for keyword in [
-      'CAST', 'CATALOG_NAME', 'CHARACTER', 'CHARACTERISTICS', 'CLASS',
-      'CONNECTION', 'DATE', 'DOMAIN', 'HOST', 'LANGUAGE', 'LENGTH', 'LEVEL',
-      'LOCATION', 'LONG', 'MATCH', 'MONTH', 'OWNER', 'POSITION', 'RESULT',
-      'ROLE', 'SHARE', 'SHOW', 'SOURCE', 'START', 'TEXT', 'TYPE', 'UID', 'USER',
-      'YEAR', 'DAY', 'PARTIAL', 'BIT', 'PUBLIC', 'QUARTER', 'NATIONAL', 'OUT',
-      'CURRENT', 'METHOD', 'FREE', 'SECURITY', 'OF', 'FIRST', 'UNKNOWN',
-      'FORWARD', 'FINAL', 'ENGINE', 'RESET', 'NONE', 'HOUR', 'GENERAL', 'END',
-      'NO', 'ALL', 'PRIMARY', 'BOTH'
-  ]:
-    if keyword in sqlparse.keywords.KEYWORDS:
-      del sqlparse.keywords.KEYWORDS[keyword]
-  for oracle_keyword in [
-      'BLOCK', 'EVENTS', 'ROLES', 'SECTION', 'STATEMENT_ID', 'TIME', 'STOP',
-      'PRIVATE', 'RESTRICTED'
-  ]:
-    if oracle_keyword in sqlparse.keywords.KEYWORDS_ORACLE:
-      del sqlparse.keywords.KEYWORDS_ORACLE[oracle_keyword]
-  if 'CHARACTER' in sqlparse.keywords.KEYWORDS_PLPGSQL:
-    del sqlparse.keywords.KEYWORDS_PLPGSQL['CHARACTER']
-  if 'BOX' in sqlparse.keywords.KEYWORDS_PLPGSQL:
-    del sqlparse.keywords.KEYWORDS_PLPGSQL['BOX']
-  if 'END' in sqlparse.keywords.KEYWORDS_COMMON:
-    del sqlparse.keywords.KEYWORDS_COMMON['END']
+    for keyword in [
+        "CAST",
+        "CATALOG_NAME",
+        "CHARACTER",
+        "CHARACTERISTICS",
+        "CLASS",
+        "CONNECTION",
+        "DATE",
+        "DOMAIN",
+        "HOST",
+        "LANGUAGE",
+        "LENGTH",
+        "LEVEL",
+        "LOCATION",
+        "LONG",
+        "MATCH",
+        "MONTH",
+        "OWNER",
+        "POSITION",
+        "RESULT",
+        "ROLE",
+        "SHARE",
+        "SHOW",
+        "SOURCE",
+        "START",
+        "TEXT",
+        "TYPE",
+        "UID",
+        "USER",
+        "YEAR",
+        "DAY",
+        "PARTIAL",
+        "BIT",
+        "PUBLIC",
+        "QUARTER",
+        "NATIONAL",
+        "OUT",
+        "CURRENT",
+        "METHOD",
+        "FREE",
+        "SECURITY",
+        "OF",
+        "FIRST",
+        "UNKNOWN",
+        "FORWARD",
+        "FINAL",
+        "ENGINE",
+        "RESET",
+        "NONE",
+        "HOUR",
+        "GENERAL",
+        "END",
+        "NO",
+        "ALL",
+        "PRIMARY",
+        "BOTH",
+    ]:
+        if keyword in sqlparse.keywords.KEYWORDS:
+            del sqlparse.keywords.KEYWORDS[keyword]
+    for oracle_keyword in [
+        "BLOCK",
+        "EVENTS",
+        "ROLES",
+        "SECTION",
+        "STATEMENT_ID",
+        "TIME",
+        "STOP",
+        "PRIVATE",
+        "RESTRICTED",
+    ]:
+        if oracle_keyword in sqlparse.keywords.KEYWORDS_ORACLE:
+            del sqlparse.keywords.KEYWORDS_ORACLE[oracle_keyword]
+    if "CHARACTER" in sqlparse.keywords.KEYWORDS_PLPGSQL:
+        del sqlparse.keywords.KEYWORDS_PLPGSQL["CHARACTER"]
+    if "BOX" in sqlparse.keywords.KEYWORDS_PLPGSQL:
+        del sqlparse.keywords.KEYWORDS_PLPGSQL["BOX"]
+    if "END" in sqlparse.keywords.KEYWORDS_COMMON:
+        del sqlparse.keywords.KEYWORDS_COMMON["END"]

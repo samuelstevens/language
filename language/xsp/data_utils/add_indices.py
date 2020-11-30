@@ -22,25 +22,26 @@ import sqlite3
 
 
 def main(db_name):
-  with open('data_utils/extra_' + db_name + '_indices.txt') as infile:
-    indices = infile.read().split('\n')
+    with open("data_utils/extra_" + db_name + "_indices.txt") as infile:
+        indices = infile.read().split("\n")
 
-  db = sqlite3.connect('databases/' + db_name + '.db')
-  c = db.cursor()
+    db = sqlite3.connect("databases/" + db_name + ".db")
+    c = db.cursor()
 
-  for index in indices:
-    print('Adding index:')
-    print(index)
-    q = index
-    c.execute(q)
-    db.commit()
+    for index in indices:
+        print("Adding index:")
+        print(index)
+        q = index
+        c.execute(q)
+        db.commit()
 
-  db.close()
+    db.close()
 
 
-if __name__ == '__main__':
-  parser = argparse.ArgumentParser()
-  parser.add_argument(
-      '--database_name', type=str, help='The database to add indices to.')
-  args = parser.parse_args()
-  main(args.database_name)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--database_name", type=str, help="The database to add indices to."
+    )
+    args = parser.parse_args()
+    main(args.database_name)
