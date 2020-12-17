@@ -20,6 +20,7 @@ import tensorflow.compat.v1.gfile as gfile
 
 import os
 import re
+from pathlib import Path
 
 import language.xsp.model.input_pipeline as input_pipeline
 import language.xsp.model.model_builder as model_builder
@@ -116,6 +117,8 @@ def main(unused_argv):
 
     config = model_config.load_config(FLAGS.config)
 
+    export_dir = str(Path(FLAGS.model_dir) / "ckpt")
+
     if FLAGS.do_train:
         tf.logging.info(
             "Training with train filenames: " + str(FLAGS.training_filename)
@@ -148,24 +151,22 @@ def main(unused_argv):
 
         with tf.Session() as sess:
             features, labels = train_input_fn({})
-            print(features)
-            print(labels)
-            model_fn_results = model_fn(features, labels, tf.estimator.ModeKeys.TRAIN)
-            print(model_fn_results)
-            return
-            # sess.run()
-            # for step in range(config.training_options.training_steps):
-            #     print("Step:", step)
-            #     loss = sess.run(model_fn_results.loss)
-            #     print(loss)
-            #     print("Ran loss for step", step)
-            #     loss = sess.run(model_fn_results.train_op)
-            #     print(loss)
-            #     print("Ran optimizer for step", step)
+            model_fn_results = model_fn(
+                features, labels, tf.estimator.ModeKeys.TRAIN)
+            sess.run(tf.global_variables_initializer())
 
-        estimator.train(
-            input_fn=train_input_fn, max_steps=config.training_options.training_steps
-        )
+            saver = tf.train.Saver()
+
+            for step in range(config.training_options.training_steps):
+                _, loss = sess.run(
+                    [model_fn_results.train_op, model_fn_results.loss])
+
+                if step % 1000 == 0:
+                    print("step:", step, "loss:", loss)
+                    save_path = saver.save(sess, export_dir )
+
+            save_path = saver.save(sess, export_dir)
+            print(step, save_path)
 
     if FLAGS.do_eval:
         max_acc = 0.0
