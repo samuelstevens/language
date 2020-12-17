@@ -15,6 +15,8 @@
 """Main file for training, evaluating, and tuning the NL to SQL model."""
 
 from __future__ import absolute_import, division, print_function
+from absl import app, flags
+import tensorflow.compat.v1.gfile as gfile
 
 import os
 import re
@@ -23,8 +25,6 @@ import language.xsp.model.input_pipeline as input_pipeline
 import language.xsp.model.model_builder as model_builder
 import language.xsp.model.model_config as model_config
 import tensorflow.compat.v1 as tf
-import tensorflow.compat.v1.gfile as gfile
-from absl import app, flags
 
 FLAGS = flags.FLAGS
 
@@ -32,7 +32,8 @@ flags.DEFINE_bool("do_train", False, "Whether to do training.")
 
 flags.DEFINE_bool("do_eval", False, "Whether to do evaluation continuously.")
 
-flags.DEFINE_string("tf_examples_dir", "", "Path to the tensorflow examples folder.")
+flags.DEFINE_string("tf_examples_dir", "",
+                    "Path to the tensorflow examples folder.")
 
 flags.DEFINE_string("config", "", "Path to the ModelConfig.")
 
@@ -50,13 +51,15 @@ flags.DEFINE_string("model_dir", "", "Path to the model folder.")
 
 flags.DEFINE_integer("eval_batch_size", 8, "Batch size for eval.")
 
-flags.DEFINE_integer("steps_between_saves", 1000, "How many steps between saves.")
+flags.DEFINE_integer("steps_between_saves", 1000,
+                     "How many steps between saves.")
 
 flags.DEFINE_integer("max_eval_steps", None, "Number of evaluation steps.")
 
 flags.DEFINE_bool("use_tpu", False, "Whether to use a TPU for training.")
 
-flags.DEFINE_string("primary", "", "The primary machine to use for TPU training.")
+flags.DEFINE_string(
+    "primary", "", "The primary machine to use for TPU training.")
 
 flags.DEFINE_integer(
     "num_tpu_shards", 1, "The number of shards to use during TPU training."
@@ -94,7 +97,15 @@ def evaluate(estimator, eval_input_fn, checkpoint):
 
         return eval_results["sequence_correct"]
     except tf.errors.NotFoundError:
-        tf.logging.info("Checkpoint %s no longer exists, skipping.", checkpoint)
+        tf.logging.info(
+            "Checkpoint %s no longer exists, skipping.", checkpoint)
+
+
+class OomReportingHook(tf.train.SessionRunHook):
+    def before_run(self, run_context):
+        return tf.train.SessionRunArgs(fetches=[],  # no extra fetches
+                                       options=tf.RunOptions(
+            report_tensor_allocations_upon_oom=True))
 
 
 def main(unused_argv):
@@ -112,16 +123,11 @@ def main(unused_argv):
 
     training_options = config.training_options
     use_tpu = FLAGS.use_tpu
-    run_config = tf.estimator.tpu.RunConfig(
-        master=FLAGS.primary,
+    run_config = tf.estimator.RunConfig(
         model_dir=FLAGS.model_dir,
         save_summary_steps=1,
         save_checkpoints_steps=FLAGS.steps_between_saves,
         keep_checkpoint_max=KEEP_CHECKPOINTS_MAX,
-        tpu_config=tf.estimator.tpu.TPUConfig(
-            iterations_per_loop=training_options.tpu_iterations_per_loop,
-            num_shards=FLAGS.num_tpu_shards,
-        ),
     )
 
     # Set up estimator, in training allows noisy examples so do not use
@@ -130,13 +136,7 @@ def main(unused_argv):
         config, FLAGS.output_vocab, clean_output_vocab_path=""
     )
 
-    estimator = tf.estimator.tpu.TPUEstimator(
-        model_fn=model_fn,
-        use_tpu=use_tpu,
-        config=run_config,
-        train_batch_size=config.training_options.batch_size,
-        eval_batch_size=FLAGS.eval_batch_size,
-    )
+    estimator = tf.estimator.Estimator(model_fn=model_fn, config=run_config)
 
     if FLAGS.do_train:
         train_input_fn = input_pipeline.create_training_input_fn(
@@ -146,15 +146,33 @@ def main(unused_argv):
             False,  # use_tpu
         )
 
+        with tf.Session() as sess:
+            features, labels = train_input_fn({})
+            print(features)
+            print(labels)
+            model_fn_results = model_fn(features, labels, tf.estimator.ModeKeys.TRAIN)
+            print(model_fn_results)
+            return
+            # sess.run()
+            # for step in range(config.training_options.training_steps):
+            #     print("Step:", step)
+            #     loss = sess.run(model_fn_results.loss)
+            #     print(loss)
+            #     print("Ran loss for step", step)
+            #     loss = sess.run(model_fn_results.train_op)
+            #     print(loss)
+            #     print("Ran optimizer for step", step)
+
         estimator.train(
-            input_fn=train_input_fn, max_steps=config.training_options.training_steps,
+            input_fn=train_input_fn, max_steps=config.training_options.training_steps
         )
 
     if FLAGS.do_eval:
         max_acc = 0.0
 
         eval_input_fn = input_pipeline.create_eval_input_fn(
-            config, FLAGS.tf_examples_dir, [FLAGS.eval_filename], False,  # use_tpu
+            config, FLAGS.tf_examples_dir, [
+                FLAGS.eval_filename], False,  # use_tpu
         )
 
         # When FLAGS.init_checkpoint = None, the latest checkpoint will be evaluated

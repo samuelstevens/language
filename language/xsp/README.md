@@ -206,6 +206,7 @@ For example:
 ```sh
 export CUDA_VISIBLE_DEVICES=7 # doesn't use any other devices besides GPU 7 (can set to 6,7)
 export TF_FORCE_GPU_ALLOW_GROWTH=true # force TF to slowly grow GPU usage
+export TF_CPP_MIN_LOG_LEVEL=3 # don't show debug, info or warning messages
 python -m language.xsp.training.train_model --do_train --tf_examples_dir=xsp_experiment_run/tf_records/ --config=xsp_experiment_run/model/model_config.json --output_vocab=xsp_experiment_run/assets/output_vocab.txt --training_filename=spider_train.tfrecords,wikisql_train.tfrecords --eval_filename=spider_dev.tfrecords --model_dir=xsp_experiment_run/experiment_trial_0 --eval_batch_size=1
 ```
 ## (4) Model inference and evaluation

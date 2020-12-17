@@ -79,7 +79,7 @@ def get_dataset(
     drop_remainder,
 ):
     """Converts a dataset file to a dataset tensor."""
-    # Get sharded files from sstable path.
+    # Get sharded files from stables path.
     tf.logging.info("Reading from " + str(data_sources))
 
     data_files = get_data_files([source_name + "@*" for source_name in data_sources])
@@ -184,5 +184,4 @@ def decode_features_and_labels(
         batched_examples = dataset.make_one_shot_iterator().get_next()
         features_batch = {k: batched_examples[k] for k in feature_keys}
         labels_batch = {k: batched_examples[k] for k in label_keys}
-
         return features_batch, labels_batch

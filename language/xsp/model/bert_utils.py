@@ -14,13 +14,12 @@
 # limitations under the License.
 """Utilities for pre-training with BERT."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import os
-from bert import modeling
+
 import tensorflow.compat.v1 as tf
+from bert import modeling
 
 
 def get_input_mask(max_seq_len, source_len):

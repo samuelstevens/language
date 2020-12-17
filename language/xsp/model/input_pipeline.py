@@ -13,19 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Defines input pipeline for processing TFRecords."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import os
 
-from language.xsp.model import constants
-from language.xsp.model import input_utils
-from language.xsp.model import sequence_example_decoder
-
-from six.moves import zip
 import tensorflow.compat.v1 as tf
 import tf_slim as slim
+from language.xsp.model import constants, input_utils, sequence_example_decoder
+from six.moves import zip
 
 # Keys used for the feature and label output dicts.
 FEATURE_KEYS = [
@@ -333,22 +328,13 @@ def create_serving_input_fn(
     return input_fn
 
 
-def _get_batch_size(model_config, params, use_tpu):
-    # params['batch_size'] is per shard batch_size calculated by
-    # model_config.training_options.batch_size / num_shards.
-    if use_tpu:
-        return params["batch_size"]
-    else:
-        return model_config.training_options.batch_size
-
-
 def create_training_input_fn(model_config, directory, filepaths, use_tpu):
     """Creates an input function that can be used with tf.learn estimators."""
 
     def input_fn(params):
         return get_features_and_labels(
             [os.path.join(directory, filepath) for filepath in filepaths],
-            _get_batch_size(model_config, params, use_tpu),
+            model_config.training_options.batch_size,
             model_config,
             use_tpu,
             shuffle=True,

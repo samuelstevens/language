@@ -344,7 +344,7 @@ def execute_predictions(
             print(prediction["database_path"])
             raise e
 
-        empty_path = prediction["empty_database_path"]
+        empty_path = "data/empty_databases/" + prediction["empty_database_path"]
         try:
             empty_conn = sqlite3.connect(empty_path)
             empty_conn.text_factory = str
@@ -417,7 +417,7 @@ def execute_predictions(
 
         ofile.write("Gold query:\n")
         ofile.write("\t" + gold_query.strip() + "\n")
-
+        
         # Get the gold results
         if cache_dict is None or gold_query not in cache_dict:
             if printable_utterance not in cache_dict:
@@ -439,7 +439,7 @@ def execute_predictions(
                     print(gold_query)
                     print(printable_utterance)
                     raise ValueError("Cache miss!")
-
+        
         gold_results = cache_dict[gold_query]
 
         if best_prediction:
@@ -584,8 +584,8 @@ def execute_predictions(
 
 
 def main(predictions_filepath, output_filepath, cache_filepath, verbose, update_cache):
-    # Load the predictions filepath.
     with open(predictions_filepath) as infile:
+    # Load the predictions filepath.
         predictions = json.load(infile)
     print("Loaded %d predictions." % len(predictions))
 

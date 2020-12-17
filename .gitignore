@@ -1,0 +1,9 @@
+.vscode/
+data/
+pretrained_bert/
+bert/
+__pycache__/
+*.swp
+.ipynb_checkpoints/
+predictions/
+xsp_experiment_run/

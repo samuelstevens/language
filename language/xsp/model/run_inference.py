@@ -342,7 +342,7 @@ def inference_wrapper(inference_fn, sharded=False):
     if not FLAGS.predictions_path:
         raise ValueError("Predictions path must be set.")
 
-    predictions = FLAGS.predictions_path + "*"
+    predictions = FLAGS.predictions_path
     # Don't run inference if predictions have already been generated.
     if not tf.gfile.Glob(FLAGS.predictions_path + "*"):
         inference_fn(
@@ -377,7 +377,6 @@ def inference_wrapper(inference_fn, sharded=False):
                 use_oracle_foriegn_keys=FLAGS.use_oracle_foriegn_keys,
             )
         predictions = FLAGS.restored_predictions_path
-
     if FLAGS.match_and_save:
         # Load the database tables.
         schema_obj = None
@@ -497,7 +496,8 @@ def match_and_save(
                     "schema": schema_obj,
                 }
             )
-
+    
+    print(output_path)
     with tf.gfile.Open(output_path, "w") as ofile:
         ofile.write(json.dumps(matched_examples))
 

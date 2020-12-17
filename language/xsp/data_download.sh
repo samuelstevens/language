@@ -144,10 +144,10 @@ if ! (test -d advising)
 then
     echo "Downloading Advising annotations."
     mkdir advising
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/blob/master/data/advising.json || exit
+    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/advising.json || exit
     mv advising.json advising/advising.json
 
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/blob/master/data/advising-schema.csv || exit
+    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/advising-schema.csv || exit
     mv advising-schema.csv advising/advising_schema.csv
 fi
 
@@ -156,10 +156,10 @@ if ! (test -d imdb)
 then
     echo "Downloading IMDB annotations."
     mkdir imdb
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/blob/master/data/imdb.json || exit
+    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/imdb.json || exit
     mv imdb.json imdb/imdb.json
 
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/blob/master/data/imdb-schema.csv || exit
+    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/imdb-schema.csv || exit
     mv imdb-schema.csv imdb/imdb_schema.csv
 fi
 
@@ -180,6 +180,11 @@ then
     exit
 fi
 
+if ! (test -d empty_databases/spider_databases)
+then
+    cp -r databases/spider_databases empty_databases
+    python /home/stevens.994/language/language/xsp/data_utils/empty_database.py --db_to_empty=empty_databases/spider_databases
+fi
 # You also need to download and install a mysql server.
 # Details on how to install: https://dev.mysql.com/doc/refman/5.7/en/installing.html
 
@@ -306,7 +311,6 @@ then
 fi
 
 # 4. Generate empty versions of the databases.
-
 if ! (test -d empty_databases)
 then
     mkdir empty_databases
