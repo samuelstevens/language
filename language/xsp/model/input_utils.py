@@ -82,7 +82,8 @@ def get_dataset(
     # Get sharded files from stables path.
     tf.logging.info("Reading from " + str(data_sources))
 
-    data_files = get_data_files([source_name + "@*" for source_name in data_sources])
+    data_files = get_data_files(
+        [source_name + "@*" for source_name in data_sources])
     tf.logging.info("First file: " + data_files[0])
 
     num_of_files = len(data_files)
@@ -153,7 +154,9 @@ def decode_features_and_labels(
     num_epochs=None,
     scope="input_fn",
 ):
-    """Creates a dataset tensor out of a dataset given placeholders."""
+    """
+    Creates a dataset for each client and a training iterator that uses a string placeholder to pick a particular dataset during training.
+    """
     with tf.variable_scope(scope):
 
         def decode_record(record):
@@ -164,9 +167,10 @@ def decode_features_and_labels(
 
         tf.logging.info("Reading from sources: " + str(data_sources))
 
-        # Load the datasets, and construct batches alternating between them.
-        datasets = [
-            get_dataset(
+        client_iterators = []
+        # Load the datasets
+        for source in data_sources:
+            dataset = get_dataset(
                 [source],
                 num_epochs,
                 batch_size,
@@ -175,13 +179,16 @@ def decode_features_and_labels(
                 shuffle,
                 drop_remainder,
             )
-            for source in data_sources
-        ]
-        choices = tf.data.Dataset.range(len(datasets)).repeat()
-        dataset = tf.data.experimental.choose_from_datasets(datasets, choices)
 
-        # Separate features and labels.
-        batched_examples = dataset.make_one_shot_iterator().get_next()
+            # Separate features and labels.
+            iterator = dataset.make_one_shot_iterator()
+            client_iterators.append(iterator)
+
+        dataset_handle = tf.placeholder(tf.string, shape=[])
+        train_iterator = tf.data.Iterator.from_string_handle(dataset_handle, dataset.output_types, dataset.output_shapes)
+
+        batched_examples = train_iterator.get_next()
         features_batch = {k: batched_examples[k] for k in feature_keys}
         labels_batch = {k: batched_examples[k] for k in label_keys}
-        return features_batch, labels_batch
+
+        return features_batch, labels_batch, client_iterators, dataset_handle

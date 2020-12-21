@@ -58,6 +58,7 @@ class TrainingOptions(
             "tpu_iterations_per_loop",
             "batch_size",
             "training_steps",
+            "client_steps",
             "layer_dropout_rate",
             "optimizer_learning_rate",
             "optimizer_warmup_steps",

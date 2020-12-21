@@ -25,6 +25,7 @@ from pathlib import Path
 import language.xsp.model.input_pipeline as input_pipeline
 import language.xsp.model.model_builder as model_builder
 import language.xsp.model.model_config as model_config
+import language.xsp.training.train_utils as train_utils
 import tensorflow.compat.v1 as tf
 
 FLAGS = flags.FLAGS
@@ -119,13 +120,15 @@ def main(unused_argv):
 
     export_dir = str(Path(FLAGS.model_dir) / "ckpt")
 
+    client_scope = 'client-scope'
+    server_scope = 'server-scope'
+    sum_scope = 'sum-scope'
+
     if FLAGS.do_train:
         tf.logging.info(
             "Training with train filenames: " + str(FLAGS.training_filename)
         )
 
-    training_options = config.training_options
-    use_tpu = FLAGS.use_tpu
     run_config = tf.estimator.RunConfig(
         model_dir=FLAGS.model_dir,
         save_summary_steps=1,
@@ -146,24 +149,56 @@ def main(unused_argv):
             config,
             FLAGS.tf_examples_dir,
             [name for name in FLAGS.training_filename if name],
-            False,  # use_tpu
         )
 
-        with tf.Session() as sess:
-            features, labels = train_input_fn({})
-            model_fn_results = model_fn(
+        features, labels, client_iterators, train_placeholder = train_input_fn()
+
+        with tf.variable_scope(client_scope):
+            client_model = model_fn(
                 features, labels, tf.estimator.ModeKeys.TRAIN)
+
+        with tf.variable_scope(server_scope):
+            server_model = model_fn(features, labels, tf.estimator.ModeKeys.EVAL)
+
+        with tf.variable_scope(sum_scope):
+            model_fn(features, labels, tf.estimator.ModeKeys.TRAIN)
+      
+        with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
+
+            client_handles = []
+            for iterator in client_iterators:
+                handle = sess.run(iterator.string_handle())
+                client_handles.append(handle)
 
             saver = tf.train.Saver()
 
-            for step in range(config.training_options.training_steps):
-                _, loss = sess.run(
-                    [model_fn_results.train_op, model_fn_results.loss])
+            # region main training loop
 
-                if step % 1000 == 0:
+            for step in range(config.training_options.training_steps):
+                sess.run(train_utils.zero(sum_scope))
+
+                for k, client_handle in enumerate(client_handles):
+                    # put wt on ck
+                    sess.run(train_utils.copy_params(server_scope, client_scope))
+
+                    # train on dk for E iterations to produce wk*
+                    for client_step in range(config.training_options.client_steps):
+                        _, loss = sess.run([client_model.train_op, client_model.loss], feed_dict={train_placeholder: client_handle})
+                        print(f'Outer step: {step}; Client: {k}; Client step: {client_step}; Loss: {loss}')
+
+                    # add wk* to sum(wk*)
+                    sess.run(train_utils.add_params(client_scope, sum_scope))
+
+                # wt+1 = mean(sum(wk*))
+                sess.run(train_utils.mean_and_assign_params(sum_scope, server_scope, len(client_handles)))
+
+                if step % FLAGS.steps_between_saves == 0:
                     print("step:", step, "loss:", loss)
-                    save_path = saver.save(sess, export_dir )
+                    print("Saving...")
+                    save_path = saver.save(sess, export_dir)
+
+            # endregion
 
             save_path = saver.save(sess, export_dir)
             print(step, save_path)
