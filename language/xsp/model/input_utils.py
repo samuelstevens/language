@@ -150,6 +150,7 @@ def decode_features_and_labels(
     batch_size,
     static_padded_shapes=None,
     drop_remainder=False,
+    federated=False,
     shuffle=False,
     num_epochs=None,
     scope="input_fn",
@@ -167,28 +168,50 @@ def decode_features_and_labels(
 
         tf.logging.info("Reading from sources: " + str(data_sources))
 
-        client_iterators = []
-        # Load the datasets
-        for source in data_sources:
-            dataset = get_dataset(
-                [source],
-                num_epochs,
-                batch_size,
-                decode_record,
-                static_padded_shapes,
-                shuffle,
-                drop_remainder,
-            )
+        if federated:
+            client_iterators = []
+            # Load the datasets
+            for source in data_sources:
+                dataset = get_dataset(
+                    [source],
+                    num_epochs,
+                    batch_size,
+                    decode_record,
+                    static_padded_shapes,
+                    shuffle,
+                    drop_remainder,
+                )
+
+                # Separate features and labels.
+                iterator = dataset.make_one_shot_iterator()
+                client_iterators.append(iterator)
+
+            dataset_handle = tf.placeholder(tf.string, shape=[])
+            train_iterator = tf.data.Iterator.from_string_handle(dataset_handle, dataset.output_types, dataset.output_shapes)
+
+            batched_examples = train_iterator.get_next()
+            features_batch = {k: batched_examples[k] for k in feature_keys}
+            labels_batch = {k: batched_examples[k] for k in label_keys}
+
+            return features_batch, labels_batch, client_iterators, dataset_handle
+        else:
+            datasets = [
+                get_dataset(
+                    [source],
+                    num_epochs,
+                    batch_size,
+                    decode_record,
+                    static_padded_shapes,
+                    shuffle,
+                    drop_remainder,
+                )
+                for source in data_sources
+            ]
+            choices = tf.data.Dataset.range(len(datasets)).repeat()
+            dataset = tf.data.experimental.choose_from_datasets(datasets, choices)
 
             # Separate features and labels.
-            iterator = dataset.make_one_shot_iterator()
-            client_iterators.append(iterator)
-
-        dataset_handle = tf.placeholder(tf.string, shape=[])
-        train_iterator = tf.data.Iterator.from_string_handle(dataset_handle, dataset.output_types, dataset.output_shapes)
-
-        batched_examples = train_iterator.get_next()
-        features_batch = {k: batched_examples[k] for k in feature_keys}
-        labels_batch = {k: batched_examples[k] for k in label_keys}
-
-        return features_batch, labels_batch, client_iterators, dataset_handle
+            batched_examples = dataset.make_one_shot_iterator().get_next()
+            features_batch = {k: batched_examples[k] for k in feature_keys}
+            labels_batch = {k: batched_examples[k] for k in label_keys}
+            return features_batch, labels_batch

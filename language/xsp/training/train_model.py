@@ -15,24 +15,27 @@
 """Main file for training, evaluating, and tuning the NL to SQL model."""
 
 from __future__ import absolute_import, division, print_function
-from absl import app, flags
-import tensorflow.compat.v1.gfile as gfile
 
 import os
 import re
-from pathlib import Path
+import statistics
+
+import tensorflow.compat.v1 as tf
+import tensorflow.compat.v1.gfile as gfile
+from absl import app, flags
 
 import language.xsp.model.input_pipeline as input_pipeline
 import language.xsp.model.model_builder as model_builder
 import language.xsp.model.model_config as model_config
-import language.xsp.training.train_utils as train_utils
-import tensorflow.compat.v1 as tf
+import language.xsp.training.train_federated as train_federated
 
 FLAGS = flags.FLAGS
 
 flags.DEFINE_bool("do_train", False, "Whether to do training.")
 
 flags.DEFINE_bool("do_eval", False, "Whether to do evaluation continuously.")
+
+flags.DEFINE_bool("federated", False, "Whether to use a federated algorithm")
 
 flags.DEFINE_string("tf_examples_dir", "",
                     "Path to the tensorflow examples folder.")
@@ -73,7 +76,7 @@ KEEP_CHECKPOINTS_MAX = 5
 def get_ckpt_number(ckpt):
     pattern = re.compile("model.ckpt-[0-9]+")
     pattern_match = pattern.search(ckpt)
-    assert pattern_match is not None
+    assert pattern_match is not None, f"'{ckpt}' should match '{pattern}'"
     return int(pattern_match.group().replace("model.ckpt-", ""))
 
 
@@ -82,32 +85,51 @@ def copy_checkpoint(source, target):
         gfile.Copy(source + ext, target + ext)
 
 
-def evaluate(estimator, eval_input_fn, checkpoint):
-    """Call estimator.evaluatior with a given checkpoint."""
+def evaluate_checkpoint(model, checkpoint):
+    saver = tf.train.Saver()
+    with tf.Session() as sess:
+        saver.restore(sess, checkpoint)
+        # in theory, the model is completely initialized
+        assert len(sess.run(tf.report_uninitialized_variables())) == 2, "only mean/total and mean/count should be uninitialized"
+        sess.run(tf.local_variables_initializer())
+
+        tf.logging.info("Evaluating checkpoint = %s", checkpoint)
+
+        results = []
+
+        if FLAGS.max_eval_steps:
+            tf.logging.info("  eval step= %d", FLAGS.max_eval_steps)
+            for step in range(FLAGS.max_eval_steps):
+                # do eval
+                _, correct = sess.run(model.eval_metric_ops)['sequence_correct']
+                results.append(correct)
+
+        else:
+            while True:
+                try:
+                    # do eval
+                    _, correct = sess.run(model.eval_metric_ops)['sequence_correct']
+                    results.append(correct)
+                except tf.errors.OutOfRangeError:
+                    break
+
+    return statistics.mean(results)
+
+
+def evaluate(eval_model, checkpoint):
+    """
+    Grabs the 'sequence_correct' key from the evaluation model for choosing hyperparams and stuff.
+    """
     try:
         tf.logging.info("***** Running evaluation *****")
         tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
-        if FLAGS.max_eval_steps:
-            tf.logging.info("  eval step= %d", FLAGS.max_eval_steps)
-        eval_results = estimator.evaluate(
-            input_fn=eval_input_fn,
-            steps=FLAGS.max_eval_steps,
-            checkpoint_path=checkpoint,
-            name=FLAGS.eval_filename.split(".")[0],
-        )
+        eval_results = evaluate_checkpoint(eval_model, checkpoint)
         tf.logging.info("Eval results: %s", eval_results)
 
-        return eval_results["sequence_correct"]
+        return eval_results
     except tf.errors.NotFoundError:
         tf.logging.info(
             "Checkpoint %s no longer exists, skipping.", checkpoint)
-
-
-class OomReportingHook(tf.train.SessionRunHook):
-    def before_run(self, run_context):
-        return tf.train.SessionRunArgs(fetches=[],  # no extra fetches
-                                       options=tf.RunOptions(
-            report_tensor_allocations_upon_oom=True))
 
 
 def main(unused_argv):
@@ -118,23 +140,10 @@ def main(unused_argv):
 
     config = model_config.load_config(FLAGS.config)
 
-    export_dir = str(Path(FLAGS.model_dir) / "ckpt")
-
-    client_scope = 'client-scope'
-    server_scope = 'server-scope'
-    sum_scope = 'sum-scope'
-
     if FLAGS.do_train:
         tf.logging.info(
             "Training with train filenames: " + str(FLAGS.training_filename)
         )
-
-    run_config = tf.estimator.RunConfig(
-        model_dir=FLAGS.model_dir,
-        save_summary_steps=1,
-        save_checkpoints_steps=FLAGS.steps_between_saves,
-        keep_checkpoint_max=KEEP_CHECKPOINTS_MAX,
-    )
 
     # Set up estimator, in training allows noisy examples so do not use
     # clean output vocab
@@ -142,81 +151,66 @@ def main(unused_argv):
         config, FLAGS.output_vocab, clean_output_vocab_path=""
     )
 
-    estimator = tf.estimator.Estimator(model_fn=model_fn, config=run_config)
-
     if FLAGS.do_train:
-        train_input_fn = input_pipeline.create_training_input_fn(
-            config,
-            FLAGS.tf_examples_dir,
-            [name for name in FLAGS.training_filename if name],
-        )
+        if FLAGS.federated:
+            train_federated.train_federated(config, flags)
+        else:
+            train_input_fn = input_pipeline.create_training_input_fn(
+                config,
+                FLAGS.tf_examples_dir,
+                [name for name in FLAGS.training_filename if name],
+                federated=False
+            )
 
-        features, labels, client_iterators, train_placeholder = train_input_fn()
+            features, labels = train_input_fn()
 
-        with tf.variable_scope(client_scope):
-            client_model = model_fn(
-                features, labels, tf.estimator.ModeKeys.TRAIN)
+            model = model_fn(features, labels, tf.estimator.ModeKeys.TRAIN)
 
-        with tf.variable_scope(server_scope):
-            server_model = model_fn(features, labels, tf.estimator.ModeKeys.EVAL)
+            with tf.Session() as sess:
+                sess.run(tf.global_variables_initializer())
 
-        with tf.variable_scope(sum_scope):
-            model_fn(features, labels, tf.estimator.ModeKeys.TRAIN)
-      
-        with tf.Session() as sess:
-            sess.run(tf.global_variables_initializer())
+                saver = tf.train.Saver()
 
-            client_handles = []
-            for iterator in client_iterators:
-                handle = sess.run(iterator.string_handle())
-                client_handles.append(handle)
+                # region main training loop
 
-            saver = tf.train.Saver()
+                for step in range(config.training_options.training_steps):
+                    _, loss = sess.run([model.train_op, model.loss])
 
-            # region main training loop
+                    if step % FLAGS.steps_between_saves == 0:
+                        print("step:", step, "loss:", loss)
+                        print("Saving checkpoing during training...")
+                        save_path = saver.save(sess, f"{FLAGS.model_dir}/ckpt-{step}")
+                        print('Saved to', save_path)
 
-            for step in range(config.training_options.training_steps):
-                sess.run(train_utils.zero(sum_scope))
+                # endregion
 
-                for k, client_handle in enumerate(client_handles):
-                    # put wt on ck
-                    sess.run(train_utils.copy_params(server_scope, client_scope))
-
-                    # train on dk for E iterations to produce wk*
-                    for client_step in range(config.training_options.client_steps):
-                        _, loss = sess.run([client_model.train_op, client_model.loss], feed_dict={train_placeholder: client_handle})
-                        print(f'Outer step: {step}; Client: {k}; Client step: {client_step}; Loss: {loss}')
-
-                    # add wk* to sum(wk*)
-                    sess.run(train_utils.add_params(client_scope, sum_scope))
-
-                # wt+1 = mean(sum(wk*))
-                sess.run(train_utils.mean_and_assign_params(sum_scope, server_scope, len(client_handles)))
-
-                if step % FLAGS.steps_between_saves == 0:
-                    print("step:", step, "loss:", loss)
-                    print("Saving...")
-                    save_path = saver.save(sess, export_dir)
-
-            # endregion
-
-            save_path = saver.save(sess, export_dir)
-            print(step, save_path)
+                print("Saving checkpoing after training...")
+                save_path = saver.save(sess, f"{FLAGS.model_dir}/ckpt-{step}")
+                print('Saved to', save_path)
 
     if FLAGS.do_eval:
         max_acc = 0.0
 
         eval_input_fn = input_pipeline.create_eval_input_fn(
-            config, FLAGS.tf_examples_dir, [
-                FLAGS.eval_filename], False,  # use_tpu
+            config, FLAGS.tf_examples_dir, [FLAGS.eval_filename], False,
         )
+
+        features, labels = eval_input_fn({'eval_batch_size': FLAGS.eval_batch_size})
+
+        if FLAGS.do_train:  # need to reuse variables
+            tf.get_variable_scope().reuse_variables()
+
+        eval_model = model_fn(features, labels, tf.estimator.ModeKeys.EVAL)
 
         # When FLAGS.init_checkpoint = None, the latest checkpoint will be evaluated
         num_train_steps = int(config.training_options.training_steps)
 
-        for ckpt in tf.estimator.training.checkpoints_iterator(FLAGS.model_dir):
-            acc = evaluate(estimator, eval_input_fn, ckpt)
-            if acc > max_acc:
+        for ckpt in tf.train.checkpoints_iterator(FLAGS.model_dir, timeout=1):
+            print(ckpt)
+            continue
+            acc = evaluate(eval_model, ckpt)
+
+            if False and acc > max_acc:
                 copy_checkpoint(
                     ckpt,
                     os.path.join(

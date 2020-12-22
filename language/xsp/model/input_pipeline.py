@@ -242,14 +242,13 @@ def get_features_and_labels(
     data_sources,
     batch_size,
     model_config,
-    use_tpu=False,
+    federated=False,
     shuffle=False,
     num_epochs=None,
     scope="input_fn",
 ):
     """Get dict of features and labels."""
-    feature_keys_to_remove = STRING_FEATURE_KEYS if use_tpu else []
-    feature_keys = _remove_keys(FEATURE_KEYS, feature_keys_to_remove)
+    feature_keys = FEATURE_KEYS
 
     if model_config.model_parameters.use_segment_ids:
         feature_keys.append(constants.SEGMENT_ID_KEY)
@@ -259,8 +258,6 @@ def get_features_and_labels(
         feature_keys.append(constants.ALIGNED_KEY)
 
     static_padded_shapes = None
-    if use_tpu:
-        static_padded_shapes = _get_static_padded_shapes(model_config)
 
     sequence_decoder = _get_sequence_decoder(
         use_segment_ids=model_config.model_parameters.use_segment_ids,
@@ -275,7 +272,8 @@ def get_features_and_labels(
         data_sources,
         batch_size,
         static_padded_shapes,
-        drop_remainder=use_tpu,
+        drop_remainder=False,
+        federated=federated,
         shuffle=shuffle,
         num_epochs=num_epochs,
         scope=scope,
@@ -330,7 +328,7 @@ def create_serving_input_fn(
     return input_fn
 
 
-def create_training_input_fn(model_config, directory, filepaths):
+def create_training_input_fn(model_config, directory, filepaths, federated=False):
     """Creates an input function that can be used with tf.learn estimators."""
 
     def input_fn():
@@ -338,7 +336,7 @@ def create_training_input_fn(model_config, directory, filepaths):
             [os.path.join(directory, filepath) for filepath in filepaths],
             model_config.training_options.batch_size,
             model_config,
-            False,
+            federated=federated,
             shuffle=True,
             num_epochs=None,
             scope="train_input_fn",
@@ -353,7 +351,7 @@ def create_eval_input_fn(model_config, directory, filepaths, use_tpu):
     def input_fn(params):
         return get_features_and_labels(
             [os.path.join(directory, filepath) for filepath in filepaths],
-            _get_batch_size(model_config, params, use_tpu),
+            params['eval_batch_size'],
             model_config,
             use_tpu,
             shuffle=True,
