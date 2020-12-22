@@ -18,6 +18,7 @@ from __future__ import absolute_import, division, print_function
 
 import os
 import re
+from pathlib import Path
 import statistics
 
 import tensorflow.compat.v1 as tf
@@ -83,6 +84,22 @@ def get_ckpt_number(ckpt):
 def copy_checkpoint(source, target):
     for ext in (".index", ".data-00000-of-00001"):
         gfile.Copy(source + ext, target + ext)
+
+
+def my_checkpoint_iterator(directory):
+    directory = Path(directory)
+    assert os.path.isfile(directory / "checkpoint")
+
+    pattern = re.compile('all_model_checkpoint_paths: "(.*)"')
+    with open(directory / "checkpoint") as checkpoint_file:
+        for line in checkpoint_file:
+            if not line.startswith("all_model_checkpoint_paths"):
+                continue
+
+            pattern_match = pattern.match(line)
+            checkpoint_name = pattern_match.group(1)
+
+            yield str(directory / checkpoint_name)
 
 
 def evaluate_checkpoint(model, checkpoint):
@@ -202,14 +219,8 @@ def main(unused_argv):
 
         eval_model = model_fn(features, labels, tf.estimator.ModeKeys.EVAL)
 
-        # When FLAGS.init_checkpoint = None, the latest checkpoint will be evaluated
-        num_train_steps = int(config.training_options.training_steps)
-
-        for ckpt in tf.train.checkpoints_iterator(FLAGS.model_dir, timeout=1):
-            print(ckpt)
-            continue
+        for ckpt in my_checkpoint_iterator(FLAGS.model_dir):
             acc = evaluate(eval_model, ckpt)
-
             if False and acc > max_acc:
                 copy_checkpoint(
                     ckpt,
@@ -221,8 +232,6 @@ def main(unused_argv):
                         + ".ckpt",
                     ),
                 )
-            if get_ckpt_number(ckpt) == num_train_steps:
-                break
 
 
 if __name__ == "__main__":
