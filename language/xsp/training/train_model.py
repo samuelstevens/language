@@ -162,12 +162,12 @@ def main(unused_argv):
             "Training with train filenames: " + str(FLAGS.training_filename)
         )
 
-    # Set up estimator, in training allows noisy examples so do not use
-    # clean output vocab
+    # Training allows noisy examples so do not use clean output vocab
     model_fn = model_builder.build_model_fn(
         config, FLAGS.output_vocab, clean_output_vocab_path=""
     )
 
+    # region training
     if FLAGS.do_train:
         if FLAGS.federated:
             train_federated.train_federated(config, flags)
@@ -204,10 +204,10 @@ def main(unused_argv):
                 print("Saving checkpoing after training...")
                 save_path = saver.save(sess, f"{FLAGS.model_dir}/ckpt-{step}")
                 print('Saved to', save_path)
+    # endregion
 
+    # region eval
     if FLAGS.do_eval:
-        max_acc = 0.0
-
         eval_input_fn = input_pipeline.create_eval_input_fn(
             config, FLAGS.tf_examples_dir, [FLAGS.eval_filename], False,
         )
@@ -220,18 +220,8 @@ def main(unused_argv):
         eval_model = model_fn(features, labels, tf.estimator.ModeKeys.EVAL)
 
         for ckpt in my_checkpoint_iterator(FLAGS.model_dir):
-            acc = evaluate(eval_model, ckpt)
-            if False and acc > max_acc:
-                copy_checkpoint(
-                    ckpt,
-                    os.path.join(
-                        FLAGS.model_dir,
-                        str(get_ckpt_number(ckpt))
-                        + "model_max_"
-                        + FLAGS.eval_filename.split(".")[0]
-                        + ".ckpt",
-                    ),
-                )
+            evaluate(eval_model, ckpt)
+    # endregion
 
 
 if __name__ == "__main__":
