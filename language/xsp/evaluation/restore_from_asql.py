@@ -15,17 +15,13 @@
 # Lint as: python3
 """Utilities for restoring under-specified FROM clause at inference time."""
 
-from __future__ import absolute_import
-from __future__ import division
-
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import json
 
-from language.xsp.data_preprocessing import abstract_sql
-from language.xsp.data_preprocessing import abstract_sql_converters
-
 import tensorflow.compat.v1 as tf
+
+from language.xsp.data_preprocessing import abstract_sql, abstract_sql_converters
 
 
 def _load_json(filepath):

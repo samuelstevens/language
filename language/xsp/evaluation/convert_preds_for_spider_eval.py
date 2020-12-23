@@ -38,19 +38,15 @@ python ${SPIDER_DIR}/spider-master/evaluation.py \
   --table "${SPIDER_DIR}/spider/tables.json"
 """
 
-from __future__ import absolute_import
-from __future__ import division
-
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import json
+import sqlite3
 
-from absl import app
-from absl import flags
+import tensorflow.compat.v1 as tf
+from absl import app, flags
 
 from language.xsp.evaluation import official_evaluation
-import sqlite3
-import tensorflow.compat.v1 as tf
 
 FLAGS = flags.FLAGS
 

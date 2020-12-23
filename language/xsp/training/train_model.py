@@ -18,9 +18,10 @@ from __future__ import absolute_import, division, print_function
 
 import os
 import re
-from pathlib import Path
 import statistics
+from pathlib import Path
 
+import replicate
 import tensorflow.compat.v1 as tf
 import tensorflow.compat.v1.gfile as gfile
 from absl import app, flags
@@ -38,8 +39,7 @@ flags.DEFINE_bool("do_eval", False, "Whether to do evaluation continuously.")
 
 flags.DEFINE_bool("federated", False, "Whether to use a federated algorithm")
 
-flags.DEFINE_string("tf_examples_dir", "",
-                    "Path to the tensorflow examples folder.")
+flags.DEFINE_string("tf_examples_dir", "", "Path to the tensorflow examples folder.")
 
 flags.DEFINE_string("config", "", "Path to the ModelConfig.")
 
@@ -57,21 +57,23 @@ flags.DEFINE_string("model_dir", "", "Path to the model folder.")
 
 flags.DEFINE_integer("eval_batch_size", 8, "Batch size for eval.")
 
-flags.DEFINE_integer("steps_between_saves", 1000,
-                     "How many steps between saves.")
+flags.DEFINE_integer("steps_between_saves", 1000, "How many steps between saves.")
 
 flags.DEFINE_integer("max_eval_steps", None, "Number of evaluation steps.")
 
 flags.DEFINE_bool("use_tpu", False, "Whether to use a TPU for training.")
 
-flags.DEFINE_string(
-    "primary", "", "The primary machine to use for TPU training.")
+flags.DEFINE_string("primary", "", "The primary machine to use for TPU training.")
 
 flags.DEFINE_integer(
     "num_tpu_shards", 1, "The number of shards to use during TPU training."
 )
 
 KEEP_CHECKPOINTS_MAX = 5
+
+
+def global_seed(seed):
+    tf.random.set_random_seed(seed)
 
 
 def get_ckpt_number(ckpt):
@@ -107,7 +109,11 @@ def evaluate_checkpoint(model, checkpoint):
     with tf.Session() as sess:
         saver.restore(sess, checkpoint)
         # in theory, the model is completely initialized
-        assert len(sess.run(tf.report_uninitialized_variables())) == 2, "only mean/total and mean/count should be uninitialized"
+
+        # only the variables used in evaluating should be uninitialized, everything else has been restored from a checkpoint
+        assert (
+            len(sess.run(tf.report_uninitialized_variables())) == 2
+        ), "only mean/total and mean/count should be uninitialized"
         sess.run(tf.local_variables_initializer())
 
         tf.logging.info("Evaluating checkpoint = %s", checkpoint)
@@ -118,14 +124,14 @@ def evaluate_checkpoint(model, checkpoint):
             tf.logging.info("  eval step= %d", FLAGS.max_eval_steps)
             for step in range(FLAGS.max_eval_steps):
                 # do eval
-                _, correct = sess.run(model.eval_metric_ops)['sequence_correct']
+                _, correct = sess.run(model.eval_metric_ops)["sequence_correct"]
                 results.append(correct)
 
         else:
             while True:
                 try:
                     # do eval
-                    _, correct = sess.run(model.eval_metric_ops)['sequence_correct']
+                    _, correct = sess.run(model.eval_metric_ops)["sequence_correct"]
                     results.append(correct)
                 except tf.errors.OutOfRangeError:
                     break
@@ -145,12 +151,13 @@ def evaluate(eval_model, checkpoint):
 
         return eval_results
     except tf.errors.NotFoundError:
-        tf.logging.info(
-            "Checkpoint %s no longer exists, skipping.", checkpoint)
+        tf.logging.info("Checkpoint %s no longer exists, skipping.", checkpoint)
 
 
 def main(unused_argv):
     tf.logging.info("Saving model saves and results to " + FLAGS.model_dir)
+
+    global_seed(42)
 
     if not FLAGS.do_train and not FLAGS.do_eval:
         raise ValueError("At least one of `do_train`, `do_eval` must be True.")
@@ -169,6 +176,16 @@ def main(unused_argv):
 
     # region training
     if FLAGS.do_train:
+        experiment = replicate.init(
+            params={
+                "learning_rate": config.training_options.optimizer_learning_rate,
+                "batch_size": config.training_options.batch_size,
+                "training_steps": config.training_options.training_steps,
+                "eval_batch_size": FLAGS.eval_batch_size,
+                "training_data": FLAGS.training_filename,
+                "eval_data": FLAGS.eval_filename,
+            },
+        )
         if FLAGS.federated:
             train_federated.train_federated(config, flags)
         else:
@@ -176,7 +193,7 @@ def main(unused_argv):
                 config,
                 FLAGS.tf_examples_dir,
                 [name for name in FLAGS.training_filename if name],
-                federated=False
+                federated=False,
             )
 
             features, labels = train_input_fn()
@@ -186,7 +203,7 @@ def main(unused_argv):
             with tf.Session() as sess:
                 sess.run(tf.global_variables_initializer())
 
-                saver = tf.train.Saver()
+                saver = tf.train.Saver(max_to_keep=20)
 
                 # region main training loop
 
@@ -194,16 +211,13 @@ def main(unused_argv):
                     _, loss = sess.run([model.train_op, model.loss])
 
                     if step % FLAGS.steps_between_saves == 0:
-                        print("step:", step, "loss:", loss)
-                        print("Saving checkpoing during training...")
-                        save_path = saver.save(sess, f"{FLAGS.model_dir}/ckpt-{step}")
-                        print('Saved to', save_path)
+                        saver.save(sess, f"{FLAGS.model_dir}/ckpt-{step}")
+                        experiment.checkpoint(step=step, metrics={"loss": loss}, primary_metric=("loss", "minimize"))
 
                 # endregion
 
-                print("Saving checkpoing after training...")
-                save_path = saver.save(sess, f"{FLAGS.model_dir}/ckpt-{step}")
-                print('Saved to', save_path)
+                saver.save(sess, f"{FLAGS.model_dir}/ckpt-{config.training_options.training_steps}")
+                experiment.checkpoint(step=config.training_options.training_steps, metrics={"loss": loss}, primary_metric=("loss", "minimize"))
     # endregion
 
     # region eval
@@ -212,15 +226,15 @@ def main(unused_argv):
             config, FLAGS.tf_examples_dir, [FLAGS.eval_filename], False,
         )
 
-        features, labels = eval_input_fn({'eval_batch_size': FLAGS.eval_batch_size})
+        features, labels = eval_input_fn({"eval_batch_size": FLAGS.eval_batch_size})
 
-        if FLAGS.do_train:  # need to reuse variables
+        if FLAGS.do_train:  # need to reuse variables because the model was defined already in the training section
             tf.get_variable_scope().reuse_variables()
 
         eval_model = model_fn(features, labels, tf.estimator.ModeKeys.EVAL)
 
         for ckpt in my_checkpoint_iterator(FLAGS.model_dir):
-            evaluate(eval_model, ckpt)
+            print(evaluate(eval_model, ckpt))
     # endregion
 
 

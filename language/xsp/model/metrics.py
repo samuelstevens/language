@@ -13,8 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Utilities for defining evaluation metrics during training."""
-from language.xsp.model import decode_utils
 import tensorflow.compat.v1 as tf
+
+from language.xsp.model import decode_utils
 
 
 def _sequence_correct(labels, predictions):
@@ -29,6 +30,7 @@ def _sequence_correct(labels, predictions):
     equal_tokens = decode_utils.compare_decode_steps(
         target_decode_steps, predicted_decode_steps
     )
+
     target_len = labels["target_len"] - 1
     loss_mask = tf.sequence_mask(
         lengths=tf.to_int32(target_len), maxlen=tf.to_int32(tf.shape(equal_tokens)[1])

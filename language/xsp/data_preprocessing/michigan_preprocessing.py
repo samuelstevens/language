@@ -14,17 +14,17 @@
 # limitations under the License.
 """Loads the Michigan datasets from a file."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import csv
 import json
 
-from language.xsp.data_preprocessing.nl_to_sql_example import NLToSQLExample
-from language.xsp.data_preprocessing.nl_to_sql_example import populate_utterance
-
 import tensorflow.compat.v1.gfile as gfile
+
+from language.xsp.data_preprocessing.nl_to_sql_example import (
+    NLToSQLExample,
+    populate_utterance,
+)
 
 
 def get_nl_sql_pairs(filepath, splits, with_dbs=False):

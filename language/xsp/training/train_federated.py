@@ -15,9 +15,9 @@ def train_federated(config, flags):
     Trains the model with fed avg.
     """
 
-    client_scope = 'client-scope'
-    server_scope = 'server-scope'
-    sum_scope = 'sum-scope'
+    client_scope = "client-scope"
+    server_scope = "server-scope"
+    sum_scope = "sum-scope"
 
     export_dir = str(Path(flags.model_dir) / "ckpt")
 
@@ -25,7 +25,7 @@ def train_federated(config, flags):
         config,
         flags.tf_examples_dir,
         [name for name in flags.training_filename if name],
-        federated=True
+        federated=True,
     )
 
     features, labels, client_iterators, train_placeholder = train_input_fn()
@@ -36,8 +36,7 @@ def train_federated(config, flags):
     )
 
     with tf.variable_scope(client_scope):
-        client_model = model_fn(
-            features, labels, tf.estimator.ModeKeys.TRAIN)
+        client_model = model_fn(features, labels, tf.estimator.ModeKeys.TRAIN)
 
     with tf.variable_scope(server_scope):
         server_model = model_fn(features, labels, tf.estimator.ModeKeys.EVAL)
@@ -66,14 +65,23 @@ def train_federated(config, flags):
 
                 # train on dk for E iterations to produce wk*
                 for client_step in range(config.training_options.client_steps):
-                    _, loss = sess.run([client_model.train_op, client_model.loss], feed_dict={train_placeholder: client_handle})
-                    print(f'Outer step: {step}; Client: {k}; Client step: {client_step}; Loss: {loss}')
+                    _, loss = sess.run(
+                        [client_model.train_op, client_model.loss],
+                        feed_dict={train_placeholder: client_handle},
+                    )
+                    print(
+                        f"Outer step: {step}; Client: {k}; Client step: {client_step}; Loss: {loss}"
+                    )
 
                 # add wk* to sum(wk*)
                 sess.run(train_utils.add_params(client_scope, sum_scope))
 
             # wt+1 = mean(sum(wk*))
-            sess.run(train_utils.mean_and_assign_params(sum_scope, server_scope, len(client_handles)))
+            sess.run(
+                train_utils.mean_and_assign_params(
+                    sum_scope, server_scope, len(client_handles)
+                )
+            )
 
             if step % flags.steps_between_saves == 0:
                 print("step:", step, "loss:", loss)

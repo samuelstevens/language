@@ -19,6 +19,7 @@ from __future__ import absolute_import, division, print_function
 import os
 
 import tensorflow.compat.v1 as tf
+
 from bert import modeling
 
 

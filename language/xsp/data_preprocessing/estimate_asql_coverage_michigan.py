@@ -37,21 +37,19 @@ Note that these estimates can be inexact for the following reasons:
   SQL.
 """
 
-from __future__ import absolute_import
-from __future__ import division
-
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import collections
 import json
 import os
 
-from absl import app
-from absl import flags
+from absl import app, flags
 
-from language.xsp.data_preprocessing import abstract_sql
-from language.xsp.data_preprocessing import abstract_sql_converters
-from language.xsp.data_preprocessing import michigan_preprocessing
+from language.xsp.data_preprocessing import (
+    abstract_sql,
+    abstract_sql_converters,
+    michigan_preprocessing,
+)
 
 FLAGS = flags.FLAGS
 

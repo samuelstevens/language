@@ -16,6 +16,7 @@
 # TODO(alanesuhr): Rename things "positive_loss" etc. to just "loss".
 
 import collections
+
 import tensorflow.compat.v1 as tf
 
 # Add an epsilon value to prevent 1 - probs from ever being 0.

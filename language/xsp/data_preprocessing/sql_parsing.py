@@ -13,15 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """For converting from a SQL query to output/decoder actions."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
-from language.xsp.data_preprocessing.schema_utils import DatabaseTable
-from language.xsp.data_preprocessing.schema_utils import TableColumn
-from language.xsp.data_preprocessing.sql_utils import SchemaEntityCopy
-from language.xsp.data_preprocessing.sql_utils import SQLAction
 import sqlparse
+
+from language.xsp.data_preprocessing.schema_utils import DatabaseTable, TableColumn
+from language.xsp.data_preprocessing.sql_utils import SchemaEntityCopy, SQLAction
 
 VALID_GENERATED_TOKENS = {"1"}
 

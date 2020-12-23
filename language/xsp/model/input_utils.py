@@ -19,8 +19,9 @@ import multiprocessing
 
 import tensorflow.compat.v1 as tf
 import tensorflow.compat.v1.gfile as gfile
-from language.xsp.model import constants
 from six.moves import zip
+
+from language.xsp.model import constants
 
 
 def get_source_len_fn(key):
@@ -82,8 +83,7 @@ def get_dataset(
     # Get sharded files from stables path.
     tf.logging.info("Reading from " + str(data_sources))
 
-    data_files = get_data_files(
-        [source_name + "@*" for source_name in data_sources])
+    data_files = get_data_files([source_name + "@*" for source_name in data_sources])
     tf.logging.info("First file: " + data_files[0])
 
     num_of_files = len(data_files)
@@ -187,7 +187,9 @@ def decode_features_and_labels(
                 client_iterators.append(iterator)
 
             dataset_handle = tf.placeholder(tf.string, shape=[])
-            train_iterator = tf.data.Iterator.from_string_handle(dataset_handle, dataset.output_types, dataset.output_shapes)
+            train_iterator = tf.data.Iterator.from_string_handle(
+                dataset_handle, dataset.output_types, dataset.output_shapes
+            )
 
             batched_examples = train_iterator.get_next()
             features_batch = {k: batched_examples[k] for k in feature_keys}

@@ -16,7 +16,6 @@
 
 import tensorflow.compat.v1 as tf
 
-
 # Default value for INF
 INF = 1.0 * 10000000
 

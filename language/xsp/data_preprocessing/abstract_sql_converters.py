@@ -14,16 +14,11 @@
 # limitations under the License.
 """Utilties for converting to/from SqlSpan tuples to/from NLToSQLExample."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
-from language.xsp.data_preprocessing import abstract_sql
-from language.xsp.data_preprocessing import schema_utils
-
+from language.xsp.data_preprocessing import abstract_sql, schema_utils
 from language.xsp.data_preprocessing.sql_parsing import VALID_GENERATED_TOKENS
-from language.xsp.data_preprocessing.sql_utils import SchemaEntityCopy
-from language.xsp.data_preprocessing.sql_utils import SQLAction
+from language.xsp.data_preprocessing.sql_utils import SchemaEntityCopy, SQLAction
 
 
 class ParseError(Exception):

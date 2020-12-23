@@ -16,11 +16,10 @@
 import json
 import os
 
-from absl import app
-from absl import flags
+import tensorflow.compat.v1.gfile as gfile
+from absl import app, flags
 
 from language.xsp.data_preprocessing.nl_to_sql_example import NLToSQLExample
-import tensorflow.compat.v1.gfile as gfile
 
 FLAGS = flags.FLAGS
 
@@ -42,7 +41,9 @@ def main(unused_argv):
                         gold_query = (
                             NLToSQLExample().from_json(json.loads(line)).gold_sql_query
                         )
-
+                        new_symbols = [token.symbol for token in gold_query.actions if token.symbol and token.symbol not in vocabulary]
+                        if new_symbols:
+                            print(new_symbols)
                         for token in gold_query.actions:
                             if token.symbol:
                                 vocabulary.add(token.symbol)

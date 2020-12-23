@@ -14,15 +14,14 @@
 # limitations under the License.
 """Standard format for an example mapping from NL to SQL."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
-from language.xsp.data_preprocessing.language_utils import get_wordpieces
-from language.xsp.data_preprocessing.language_utils import Wordpiece
-from language.xsp.data_preprocessing.schema_utils import DatabaseTable
-from language.xsp.data_preprocessing.schema_utils import get_schema_entities
-from language.xsp.data_preprocessing.schema_utils import process_tables
+from language.xsp.data_preprocessing.language_utils import Wordpiece, get_wordpieces
+from language.xsp.data_preprocessing.schema_utils import (
+    DatabaseTable,
+    get_schema_entities,
+    process_tables,
+)
 from language.xsp.data_preprocessing.sql_utils import SQLQuery
 
 
@@ -94,6 +93,9 @@ class NLToSQLExample(object):
             else:
                 gold_query.append(action.utterance_copy.wordpiece)
         return " ".join(gold_query)
+
+    def __repr__(self):
+        return f"(model_input: {self.model_input}, gold_sql_query: {self.gold_sql_query})"
 
 
 def populate_utterance(example, utterance, schema, tokenizer):

@@ -16,6 +16,7 @@
 from __future__ import absolute_import, division, print_function
 
 import tensorflow.compat.v1 as tf
+
 from language.xsp.model import (
     adam_weight_decay,
     bert_utils,
@@ -25,7 +26,6 @@ from language.xsp.model import (
     load_from_checkpoint,
     loss,
     metrics,
-    tpu_utils,
     transformer,
 )
 
@@ -84,8 +84,7 @@ def build_model_fn(
             model_config, output_vocab_filepath
         )
 
-        output_vocab_size = embeddings.get_output_vocab_size(
-            output_vocab_filepath)
+        output_vocab_size = embeddings.get_output_vocab_size(output_vocab_filepath)
 
         clean_output_mask = None
         if clean_output_vocab_path:

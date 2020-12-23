@@ -14,16 +14,13 @@
 # limitations under the License.
 """Utilities for processing the SQL output."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
+
+import sqlparse
 
 from language.xsp.data_preprocessing import sqlparse_keyword_utils
 from language.xsp.data_preprocessing.language_utils import Wordpiece
-from language.xsp.data_preprocessing.schema_utils import DatabaseTable
-from language.xsp.data_preprocessing.schema_utils import TableColumn
-
-import sqlparse
+from language.xsp.data_preprocessing.schema_utils import DatabaseTable, TableColumn
 
 sqlparse_keyword_utils.remove_bad_sqlparse_keywords()
 
@@ -106,6 +103,9 @@ class SchemaEntityCopy(object):
             self.copied_column = TableColumn().from_json(dictionary["copied_column"])
             return self
 
+    def __repr__(self):
+        return f"(copied_table: {self.copied_table}, copied_column: {self.copied_column})"
+
 
 class SQLAction(object):
     """Describes a single generation action for a SQL query."""
@@ -142,6 +142,9 @@ class SQLAction(object):
             self.utterance_copy = Wordpiece().from_json(dictionary["utterance_copy"])
             return self
 
+    def __repr__(self):
+        return f"(symbol: {self.symbol}, entity_copy: {self.entity_copy}, utterance_copy: {self.utterance_copy})"
+
 
 class SQLQuery(object):
     """Contains information about a SQL query grounded in an utterance/schema."""
@@ -159,3 +162,6 @@ class SQLQuery(object):
                 self.actions.append(SQLAction().from_json(action))
             return self
         return None
+
+    def __repr__(self):
+        return f"(actions: {self.actions})"

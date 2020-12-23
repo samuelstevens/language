@@ -19,8 +19,9 @@ import os
 
 import tensorflow.compat.v1 as tf
 import tf_slim as slim
-from language.xsp.model import constants, input_utils, sequence_example_decoder
 from six.moves import zip
+
+from language.xsp.model import constants, input_utils, sequence_example_decoder
 
 # Keys used for the feature and label output dicts.
 FEATURE_KEYS = [
@@ -41,8 +42,7 @@ LABEL_KEYS = [
 ]
 
 # Delete string tensors on TPU because we cannot pass strings to TPU.
-STRING_FEATURE_KEYS = [constants.LANGUAGE_KEY,
-                       constants.REGION_KEY, constants.TAG_KEY]
+STRING_FEATURE_KEYS = [constants.LANGUAGE_KEY, constants.REGION_KEY, constants.TAG_KEY]
 
 
 def _get_target_action_types(keys_to_tensors):
@@ -56,8 +56,7 @@ def _get_target_action_ids(keys_to_tensors):
     tensor = keys_to_tensors[constants.TARGET_ACTION_IDS_KEY]
     # Modify tensor for start and end symbols.
     tensor = tf.concat(
-        [[constants.TARGET_START_SYMBOL_ID], tensor,
-            [constants.TARGET_END_SYMBOL_ID]],
+        [[constants.TARGET_START_SYMBOL_ID], tensor, [constants.TARGET_END_SYMBOL_ID]],
         0,
     )
     return tensor
@@ -351,7 +350,7 @@ def create_eval_input_fn(model_config, directory, filepaths, use_tpu):
     def input_fn(params):
         return get_features_and_labels(
             [os.path.join(directory, filepath) for filepath in filepaths],
-            params['eval_batch_size'],
+            params["eval_batch_size"],
             model_config,
             use_tpu,
             shuffle=True,

@@ -13,29 +13,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Runs inference on an XSP model."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import json
 import os
 
-from absl import app
-from absl import flags
 import apache_beam as beam
-
-from language.xsp.data_preprocessing.michigan_preprocessing import get_nl_sql_pairs
-from language.xsp.data_preprocessing.michigan_preprocessing import read_schema
-from language.xsp.data_preprocessing.spider_preprocessing import load_spider_examples
-from language.xsp.data_preprocessing.spider_preprocessing import load_spider_tables
-from language.xsp.data_preprocessing.spider_preprocessing import preprocess_sql
-from language.xsp.evaluation import restore_from_asql
-from language.xsp.model import input_pipeline
-from language.xsp.model import model_builder
-from language.xsp.model.model_config import load_config
-
 import sqlparse
 import tensorflow.compat.v1 as tf
+from absl import app, flags
+
+from language.xsp.data_preprocessing.michigan_preprocessing import (
+    get_nl_sql_pairs,
+    read_schema,
+)
+from language.xsp.data_preprocessing.spider_preprocessing import (
+    load_spider_examples,
+    load_spider_tables,
+    preprocess_sql,
+)
+from language.xsp.evaluation import restore_from_asql
+from language.xsp.model import input_pipeline, model_builder
+from language.xsp.model.model_config import load_config
 
 FLAGS = flags.FLAGS
 
@@ -496,7 +495,7 @@ def match_and_save(
                     "schema": schema_obj,
                 }
             )
-    
+
     print(output_path)
     with tf.gfile.Open(output_path, "w") as ofile:
         ofile.write(json.dumps(matched_examples))

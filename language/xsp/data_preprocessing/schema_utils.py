@@ -14,14 +14,11 @@
 # limitations under the License.
 """Contains utilities for processing database schemas."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import json
 
-from language.xsp.data_preprocessing.language_utils import get_wordpieces
-from language.xsp.data_preprocessing.language_utils import Wordpiece
+from language.xsp.data_preprocessing.language_utils import Wordpiece, get_wordpieces
 
 ACCEPTABLE_COL_TYPES = {"text", "number", "others", "time", "boolean"}
 

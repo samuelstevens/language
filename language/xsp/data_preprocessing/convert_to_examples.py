@@ -13,29 +13,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Used to convert raw data to the standard JSON format for examples."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import json
 import os
 
-from absl import app
-from absl import flags
+import tensorflow.compat.v1.gfile as gfile
+from absl import app, flags
 
 from bert.tokenization import FullTokenizer
-from language.xsp.data_preprocessing import abstract_sql
-from language.xsp.data_preprocessing import abstract_sql_converters
-from language.xsp.data_preprocessing.michigan_preprocessing import convert_michigan
-from language.xsp.data_preprocessing.michigan_preprocessing import get_nl_sql_pairs
-from language.xsp.data_preprocessing.michigan_preprocessing import read_schema
-from language.xsp.data_preprocessing.spider_preprocessing import convert_spider
-from language.xsp.data_preprocessing.spider_preprocessing import load_spider_examples
-from language.xsp.data_preprocessing.spider_preprocessing import load_spider_tables
-from language.xsp.data_preprocessing.wikisql_preprocessing import convert_wikisql
-from language.xsp.data_preprocessing.wikisql_preprocessing import load_wikisql_tables
-
-import tensorflow.compat.v1.gfile as gfile
+from language.xsp.data_preprocessing import abstract_sql, abstract_sql_converters
+from language.xsp.data_preprocessing.michigan_preprocessing import (
+    convert_michigan,
+    get_nl_sql_pairs,
+    read_schema,
+)
+from language.xsp.data_preprocessing.spider_preprocessing import (
+    convert_spider,
+    load_spider_examples,
+    load_spider_tables,
+)
+from language.xsp.data_preprocessing.wikisql_preprocessing import (
+    convert_wikisql,
+    load_wikisql_tables,
+)
 
 FLAGS = flags.FLAGS
 

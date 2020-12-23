@@ -25,6 +25,7 @@ import random
 import apache_beam as beam
 import tensorflow.compat.v1 as tf
 from absl import app, flags
+
 from language.xsp.data_preprocessing.nl_to_sql_example import NLToSQLExample
 from language.xsp.model.model_config import load_config
 

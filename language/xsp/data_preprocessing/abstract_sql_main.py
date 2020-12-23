@@ -32,18 +32,13 @@ python ${SPIDER_DIR}/spider-master/evaluation.py \
   --table "${SPIDER_DIR}/spider/tables.json"
 """
 
-from __future__ import absolute_import
-from __future__ import division
-
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import json
 
-from absl import app
-from absl import flags
+from absl import app, flags
 
-from language.xsp.data_preprocessing import abstract_sql
-from language.xsp.data_preprocessing import abstract_sql_converters
+from language.xsp.data_preprocessing import abstract_sql, abstract_sql_converters
 
 FLAGS = flags.FLAGS
 

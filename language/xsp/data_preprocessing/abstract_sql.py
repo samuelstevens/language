@@ -20,16 +20,13 @@ SQL parser, and additional heuristics.
 TODO(petershaw): A proper parser and grammar for SQL would improve robustness!
 """
 
-from __future__ import absolute_import
-from __future__ import division
-
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import collections
 
-from language.xsp.data_preprocessing import sqlparse_keyword_utils
-
 import sqlparse
+
+from language.xsp.data_preprocessing import sqlparse_keyword_utils
 
 sqlparse_keyword_utils.remove_bad_sqlparse_keywords()
 

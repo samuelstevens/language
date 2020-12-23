@@ -14,21 +14,20 @@
 # limitations under the License.
 """Utilities for loading the WikiSQL dataset."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import json
 
-from language.xsp.data_preprocessing import abstract_sql
-from language.xsp.data_preprocessing import abstract_sql_converters
-from language.xsp.data_preprocessing.nl_to_sql_example import NLToSQLExample
-from language.xsp.data_preprocessing.nl_to_sql_example import populate_utterance
-from language.xsp.data_preprocessing.sql_parsing import ParseError
-from language.xsp.data_preprocessing.sql_parsing import populate_sql
-from language.xsp.data_preprocessing.sql_utils import preprocess_sql
 import sqlparse
 import tensorflow.compat.v1.gfile as gfile
+
+from language.xsp.data_preprocessing import abstract_sql, abstract_sql_converters
+from language.xsp.data_preprocessing.nl_to_sql_example import (
+    NLToSQLExample,
+    populate_utterance,
+)
+from language.xsp.data_preprocessing.sql_parsing import ParseError, populate_sql
+from language.xsp.data_preprocessing.sql_utils import preprocess_sql
 
 
 def normalize_sql(sql, replace_period=True):

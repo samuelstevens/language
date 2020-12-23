@@ -22,17 +22,15 @@ Arguments:
     queries to cached resulting tables.  Should be ran locally. All filepaths
     above should refer to the local filesystem.
 """
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import argparse
 import json
 import os
+import sqlite3
 import time
 
 import numpy as np
-import sqlite3
 import timeout_decorator
 from tqdm import tqdm
 
@@ -417,7 +415,7 @@ def execute_predictions(
 
         ofile.write("Gold query:\n")
         ofile.write("\t" + gold_query.strip() + "\n")
-        
+
         # Get the gold results
         if cache_dict is None or gold_query not in cache_dict:
             if printable_utterance not in cache_dict:
@@ -439,7 +437,7 @@ def execute_predictions(
                     print(gold_query)
                     print(printable_utterance)
                     raise ValueError("Cache miss!")
-        
+
         gold_results = cache_dict[gold_query]
 
         if best_prediction:
@@ -585,7 +583,7 @@ def execute_predictions(
 
 def main(predictions_filepath, output_filepath, cache_filepath, verbose, update_cache):
     with open(predictions_filepath) as infile:
-    # Load the predictions filepath.
+        # Load the predictions filepath.
         predictions = json.load(infile)
     print("Loaded %d predictions." % len(predictions))
 

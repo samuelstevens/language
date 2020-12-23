@@ -15,14 +15,16 @@
 """Contains functions for loading and preprocessing the Spider data."""
 import json
 
-from language.xsp.data_preprocessing import abstract_sql_converters
-from language.xsp.data_preprocessing.nl_to_sql_example import NLToSQLExample
-from language.xsp.data_preprocessing.nl_to_sql_example import populate_utterance
-from language.xsp.data_preprocessing.sql_parsing import populate_sql
-from language.xsp.data_preprocessing.sql_utils import preprocess_sql
-
 import sqlparse
 import tensorflow.compat.v1.gfile as gfile
+
+from language.xsp.data_preprocessing import abstract_sql_converters
+from language.xsp.data_preprocessing.nl_to_sql_example import (
+    NLToSQLExample,
+    populate_utterance,
+)
+from language.xsp.data_preprocessing.sql_parsing import populate_sql
+from language.xsp.data_preprocessing.sql_utils import preprocess_sql
 
 WRONG_TRAINING_EXAMPLES = {
     # In this query the SQL query mentions a ref_company_types table that is not

@@ -23,8 +23,9 @@ concatenation of the output vocabulary and the source, in that order.
 
 import collections
 
-from language.xsp.model import constants
 import tensorflow.compat.v1 as tf
+
+from language.xsp.model import constants
 
 # Represents a decoder step.
 # Each tensor is expected to be shape [batch_size, output_length].

@@ -15,11 +15,10 @@
 """Utilities for generating input embeddings and output embedding table."""
 import math
 
-from language.xsp.model import bert_utils
-from language.xsp.model import common_layers
-from language.xsp.model import constants
 import tensorflow.compat.v1 as tf
 import tensorflow.compat.v1.gfile as gfile
+
+from language.xsp.model import bert_utils, common_layers, constants
 
 # Added to avoid division by zero.
 EPSILON = 0.00000001
