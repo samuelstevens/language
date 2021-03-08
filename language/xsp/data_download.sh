@@ -12,9 +12,26 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#~/usr/bin/env bash
+#!/usr/bin/env bash
 
-TRAIN_ONLY_ARG="train_only"
+# modified by samuelstevens based on suggestions from
+# https://blog.yossarian.net/2020/01/23/Anybody-can-write-good-bash-with-a-little-effort
+
+set -euo pipefail
+
+# Arguments in the form of environment variables
+TRAIN_ONLY=${TRAIN_ONLY:-""}
+MYSQL_IMAGE_NAME=${MYSQL_IMAGE_NAME:-"local-mysql"}
+MYSQL_USER=${MYSQL_USER:-"root"}
+MYSQL_PASSWORD=${MYSQL_PASSWORD:-"password"}
+
+# 0. Copy data_utils scripts/prefix.txts to data/ directory
+if [[ -d data_utils ]]; then
+    echo "Copy the 'data_utils/' directory's contents to $(pwd)/data_utils"
+    echo "You need the *-prefix.txt files and the *.py files"
+    echo "This script can't copy them because I don't know where language/xsp/data_utils is relative to your data/ directory."
+    exit
+fi
 
 # 1. Need to download the Spider dataset from the website directly (wget won't
 # work with Google drive links).
@@ -38,21 +55,35 @@ fi
 # called dataset_name/, with two files inside: dataset.json and
 # dataset_schema.csv.
 
+download_github() {
+  # downloads from github, trying both with and without /blob/
+  blob_pattern='https?:\/\/.*\.com\/.*\/.*\/blob\/.*'
+  if echo $1 | grep $blob_pattern; then
+    # make alternate the pattern without /blob
+    alternate=$(echo $1 | sed -r 's/(https:?\/\/.*\.com\/[^/]*\/[^/]*\/)blob\/(.*)/\1\2/g')
+  else
+    # make alternate the pattern with /blob
+    alternate=$(echo $1 | sed -r 's/(https:?\/\/.*\.com\/[^/]*\/[^/]*\/)(.*)/\1blob\/\2/g')
+  fi
+
+  wget $1 || wget $alternate
+}
+
 # WikiSQL
 if ! (test -d wikisql)
 then
     echo "************************ DOWNLOADING DATASET: WikiSQL ************************"
     mkdir wikisql
-    wget https://github.com/jkkummerfeld/text2sql-data/blob/master/data/wikisql.json.bz2?raw=true
+    download_github https://github.com/jkkummerfeld/text2sql-data/blob/master/data/wikisql.json.bz2?raw=true
     mv wikisql.json.bz2?raw=true wikisql/wikisql.json.bz2
 
     bzip2 -d wikisql/wikisql.json.bz2
 
     # TODO: Get the schemas
-    wget https://github.com/salesforce/WikiSQL/blob/master/data.tar.bz2?raw=true
+    download_github https://github.com/salesforce/WikiSQL/master/data.tar.bz2?raw=true
     mv data.tar.bz2?raw=true wikisql/data.tar.bz2
     bzip2 -d wikisql/data.tar.bz2
-    tar -xzvf wikisql/data.tar
+    tar -xzvf wikisql/data.tar || tar -xvf wikisql/data.tar
 
     mv data/* wikisql/
     rm -rf data
@@ -61,7 +92,7 @@ else
 fi
 
 # Exit here if not downloading the evaluation data.
-if [ "$TRAIN_ONLY_ARG" = "$1" ]; then
+if [[ "$TRAIN_ONLY" ]]; then
     echo "Downloading training data only."
     exit
 fi
@@ -71,10 +102,10 @@ if ! (test -d geoquery)
 then
     echo "Downloading Geoquery annotations."
     mkdir geoquery
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/geography.json || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/geography.json || exit
     mv geography.json geoquery/geoquery.json
 
-    wget https://github.com/jkkummerfeld/text2sql-data/blob/master/data/geography-schema.csv || exit
+    download_github https://github.com/jkkummerfeld/text2sql-data/master/data/geography-schema.csv || exit
     mv geography-schema.csv geoquery/geoquery_schema.csv
 fi
 
@@ -83,10 +114,10 @@ if ! (test -d atis)
 then
     echo "Downloading ATIS annotations."
     mkdir atis
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/atis.json || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/atis.json || exit
     mv atis.json atis/atis.json
 
-    wget https://github.com/jkkummerfeld/text2sql-data/blob/master/data/atis-schema.csv || exit
+    download_github https://github.com/jkkummerfeld/text2sql-data/master/data/atis-schema.csv || exit
     mv atis-schema.csv atis/atis_schema.csv
 fi
 
@@ -95,10 +126,10 @@ if ! (test -d academic)
 then
     echo "Downloading Academic annotations."
     mkdir academic
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/academic.json || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/academic.json || exit
     mv academic.json academic/academic.json
 
-    wget https://github.com/jkkummerfeld/text2sql-data/blob/master/data/academic-schema.csv || exit
+    download_github https://github.com/jkkummerfeld/text2sql-data/master/data/academic-schema.csv || exit
     mv academic-schema.csv academic/academic_schema.csv
 fi
 
@@ -107,10 +138,10 @@ if ! (test -d restaurants)
 then
     echo "Downloading Restaurants annotations."
     mkdir restaurants
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/restaurants.json || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/restaurants.json || exit
     mv restaurants.json restaurants/restaurants.json
 
-    wget https://github.com/jkkummerfeld/text2sql-data/blob/master/data/restaurants-schema.csv || exit
+    download_github https://github.com/jkkummerfeld/text2sql-data/master/data/restaurants-schema.csv || exit
     mv restaurants-schema.csv restaurants/restaurants_schema.csv
 
 fi
@@ -120,10 +151,10 @@ if ! (test -d yelp)
 then
     echo "Downloading Yelp annotations."
     mkdir yelp
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/yelp.json || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/yelp.json || exit
     mv yelp.json yelp/yelp.json
 
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/blob/master/data/yelp-schema.csv || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/yelp-schema.csv || exit
     mv yelp-schema.csv yelp/yelp_schema.csv
 fi
 
@@ -132,10 +163,10 @@ if ! (test -d scholar)
 then
     echo "Downloading Scholar annotations."
     mkdir scholar
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/blob/master/data/scholar.json || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/scholar.json || exit
     mv scholar.json scholar/scholar.json
 
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/blob/master/data/scholar-schema.csv || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/scholar-schema.csv || exit
     mv scholar-schema.csv scholar/scholar_schema.csv
 fi
 
@@ -144,10 +175,10 @@ if ! (test -d advising)
 then
     echo "Downloading Advising annotations."
     mkdir advising
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/advising.json || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/advising.json || exit
     mv advising.json advising/advising.json
 
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/advising-schema.csv || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/advising-schema.csv || exit
     mv advising-schema.csv advising/advising_schema.csv
 fi
 
@@ -156,10 +187,10 @@ if ! (test -d imdb)
 then
     echo "Downloading IMDB annotations."
     mkdir imdb
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/imdb.json || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/imdb.json || exit
     mv imdb.json imdb/imdb.json
 
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/imdb-schema.csv || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/imdb-schema.csv || exit
     mv imdb-schema.csv imdb/imdb_schema.csv
 fi
 
@@ -171,20 +202,15 @@ then
 fi
 
 # Download the database utils.
-if ! (test -f data_utils/mysql2sqlite.sh)
+if ! (test -f data_utils/mysql2sqlite)
 then
-    echo "Download the mysql2sqlite.sh script here:"
-    echo "https://gist.githubusercontent.com/esperlu/943776/raw/be469f0a0ab8962350f3c5ebe8459218b915f817/mysql2sqlite.sh"
-    echo "Make sure the md5 hash of the script is 0029197bbaf57c8d60300c2e0896d137."
+    echo "Download the mysql2sqlite script here:"
+    echo "https://github.com/dumblob/mysql2sqlite/blob/master/mysql2sqlite"
     echo "Then move the downloaded script to the directory `data_utils` and rerun this script."
+    echo "Then update awk to mawk to make it much faster"
     exit
 fi
 
-if ! (test -d empty_databases/spider_databases)
-then
-    cp -r databases/spider_databases empty_databases
-    python /home/stevens.994/language/language/xsp/data_utils/empty_database.py --db_to_empty=empty_databases/spider_databases
-fi
 # You also need to download and install a mysql server.
 # Details on how to install: https://dev.mysql.com/doc/refman/5.7/en/installing.html
 
@@ -199,16 +225,36 @@ then
     done
 fi
 
+if ! (test -d empty_databases/spider_databases)
+then
+    cp -r databases/spider_databases/ empty_databases
+    python data_utils/empty_database.py --db_to_empty=empty_databases/spider_databases
+fi
+
 database_installation() {
+    if [[ $(docker ps | grep $MYSQL_IMAGE_NAME) ]]; then
+        echo "You need to start a docker image with name $MYSQL_IMAGE_NAME"
+        exit
+    fi
+
     # [1] Name of downloaded database
     # [2] Desired database name (e.g., geoquery)
-    cat data_utils/$2-prefix.txt $1 > $2-modified.sql
+
+    prefix="data_utils/$2-prefix.txt"
+
+    cat $prefix $1 > $2-modified.sql
 
     echo "Installing "$2
-    mysql -u root -p < $2-modified.sql
+    docker exec --interactive $MYSQL_IMAGE_NAME mysql --user=$MYSQL_USER --password=$MYSQL_PASSWORD < $2-modified.sql
+
+    echo "Dumping $2"
+    docker exec $MYSQL_IMAGE_NAME mysqldump --user=$MYSQL_USER --password=$MYSQL_PASSWORD $2 > $2_dump.sql
+
+    echo "Removing from MySQL"
+    echo "drop database $2;" | docker exec --interactive local-mysql mysql --user=$MYSQL_USER --password=$MYSQL_PASSWORD
 
     echo "Converting to sqlite3"
-    sh data_utils/mysql2sqlite.sh -u root -p $2 | sqlite3 databases/$2.db
+    data_utils/mysql2sqlite $2_dump.sql | sqlite3 databases/$2.db
 
     rm *.sql
 }
@@ -217,7 +263,7 @@ database_installation() {
 if ! (test -f databases/atis.db)
 then
     echo "Downloading and converting ATIS database."
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/atis-db.sql
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/atis-db.sql
 
     database_installation atis-db.sql atis
 fi
@@ -226,7 +272,7 @@ fi
 if ! (test -f databases/geoquery.db)
 then
     echo "Downloading and converting Geoquery database."
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/geography-db.sql
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/geography-db.sql
 
     database_installation geography-db.sql geoquery
 fi
@@ -235,7 +281,7 @@ fi
 if ! (test -f databases/advising.db)
 then
     echo "Downloading and converting the Advising datbase."
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/advising-db.sql
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/advising-db.sql
 
     database_installation advising-db.sql advising
 fi
@@ -279,12 +325,12 @@ fi
 # Restaurants
 if ! (test -f databases/restaurants.db)
 then
-    wget https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/restaurants-db.txt
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/restaurants-db.txt
 
     if ! (test -f data_utils/create_restaurant_database.py)
     then
         echo "You need to download the create_restaurant_database.py file into data_utils/:"
-        echo "https://github.com/jkkummerfeld/text2sql-data/blob/master/tools/create_restaurant_database.py"
+        echo "https://github.com/jkkummerfeld/text2sql-data/master/tools/create_restaurant_database.py"
         echo "We used commit #ab96e30. The md5 hash is a90157e9eab77706fbd95bf99ff65736."
         echo "You also need to modify this script slightly. On lines 23, 82, and 93, you need to change RESTAURANT_ID to ID."
         exit
