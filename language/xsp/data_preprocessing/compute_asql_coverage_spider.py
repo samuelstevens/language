@@ -46,7 +46,7 @@ def _load_json(filename):
 def compute_spider_coverage(spider_examples_json, spider_tables_json):
     """Prints out statistics for asql conversions."""
     table_json = _load_json(spider_tables_json)
-    # Map of database id to a list of ForiegnKeyRelation tuples.
+    # Map of database id to a list of ForeignKeyRelation tuples.
     foreign_key_map = abstract_sql_converters.spider_foreign_keys_map(table_json)
     table_schema_map = abstract_sql_converters.spider_table_schemas_map(table_json)
     examples = _load_json(spider_examples_json)

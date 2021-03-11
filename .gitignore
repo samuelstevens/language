@@ -8,3 +8,4 @@ __pycache__/
 predictions/
 xsp_experiment_run/
 .replicate/
+spider_ssp/

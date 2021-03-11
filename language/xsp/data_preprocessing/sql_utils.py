@@ -104,7 +104,9 @@ class SchemaEntityCopy(object):
             return self
 
     def __repr__(self):
-        return f"(copied_table: {self.copied_table}, copied_column: {self.copied_column})"
+        return (
+            f"(copied_table: {self.copied_table}, copied_column: {self.copied_column})"
+        )
 
 
 class SQLAction(object):

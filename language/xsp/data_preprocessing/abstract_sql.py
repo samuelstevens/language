@@ -23,6 +23,7 @@ TODO(petershaw): A proper parser and grammar for SQL would improve robustness!
 from __future__ import absolute_import, division, print_function
 
 import collections
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import sqlparse
 
@@ -48,12 +49,12 @@ BAD_SQL = [
     ),
 ]
 
-# This represents either a single token/identifier in the SQL query,
-# or a sequence of tokens representing a nested statement.
-# Nested statements can appear in constructions using EXCLUDE, INTERSECTION,
-# and UNION, or can appear in WHERE clauses such as IN (...).
-# A list of SqlSpan tuples represents an entire SQL query.
-# Only one of the fields should be non-None.
+"""
+This represents either a single token/identifier in the SQL query, or a sequence of tokens representing a nested statement.
+Nested statements can appear in constructions using EXCLUDE, INTERSECTION, and UNION, or can appear in WHERE clauses such as IN (...).
+A list of SqlSpan tuples represents an entire SQL query.
+Only one of the fields should be non-None.
+"""
 SqlSpan = collections.namedtuple(
     "SqlSpan",
     [
@@ -82,7 +83,7 @@ SqlColumn = collections.namedtuple("SqlColumn", ["column_name", "table_name"])
 
 # Represents a foreign-key relation between 2 tables.
 ForeignKeyRelation = collections.namedtuple(
-    "SqlSpan",
+    "ForeignKeyRelation",
     [
         "child_table",  # String name of child table.
         "parent_table",  # String name of parent table.
@@ -592,8 +593,16 @@ def replace_from_clause(sql_spans):
     return replaced_spans
 
 
-def _get_fk_relations_helper(unvisited_tables, visited_tables, fk_relations_map):
-    """Returns a ForeignKeyRelation connecting to an unvisited table, or None."""
+def _get_fk_relations_helper(
+    unvisited_tables,
+    visited_tables,
+    fk_relations_map: Mapping[Tuple[str, str], Tuple[str, str]],
+) -> Optional[Tuple[str, str]]:
+    """
+    Returns a pair of column names connecting to an unvisited table, or None.
+
+    Modifies unvisited_tables and visited_tables.
+    """
     for table_to_visit in unvisited_tables:
         for table in visited_tables:
             if (table, table_to_visit) in fk_relations_map:
@@ -601,18 +610,23 @@ def _get_fk_relations_helper(unvisited_tables, visited_tables, fk_relations_map)
                 unvisited_tables.remove(table_to_visit)
                 visited_tables.append(table_to_visit)
                 return fk_relation
+
     return None
 
 
-def _get_fk_relations_linking_tables(table_names, fk_relations):
-    """Returns (List of table names, List of (col name, col name))."""
+def _get_fk_relations_linking_tables(
+    table_names: Sequence[str], known_fk_relations: Sequence[ForeignKeyRelation]
+) -> Tuple[List[str], List[Tuple[str, str]]]:
+    """
+    Returns (List of visited table names, List of (col name, col name)).
+    """
 
     if not table_names:
         raise UnsupportedSqlError("The SQL query has not referenced any tables!")
 
     # Build map of (child table, parent table) to (child column, parent column).
-    fk_relations_map = {}
-    for relation in fk_relations:
+    fk_relations_map: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    for relation in known_fk_relations:
         # TODO(petershaw): Consider adding warning if overwriting key.
         # This can lead to ambiguous conversions back to fully-specified SQL.
         fk_relations_map[(relation.child_table, relation.parent_table)] = (
@@ -643,13 +657,17 @@ def _get_fk_relations_linking_tables(table_names, fk_relations):
                 % (table_names, fk_relations)
             )
     # Length of fk_relations will be 1 shorter than visited tables.
+    # samuelstevens: added assert to match original authors' comment above
+    assert len(visited_tables) - 1 == len(fk_relations), "Internal consistency error"
     return visited_tables, fk_relations
 
 
-def _get_from_clause_for_tables(table_names, fk_relations):
+def _get_from_clause_for_tables(
+    table_names: List[str], known_fk_relations: Sequence[ForeignKeyRelation]
+):
     """Returns list of SqlSpan tuples for FROM clause."""
     visited_tables, fk_relations = _get_fk_relations_linking_tables(
-        table_names, fk_relations
+        table_names, known_fk_relations
     )
     sql_spans = []
     sql_spans.append(make_sql_span(table_name=visited_tables[0]))
@@ -707,7 +725,7 @@ def restore_from_clause(sql_spans, fk_relations):
 
   Args:
     sql_spans: List of SqlSpan tuples with underspecified FROM clause(s).
-    fk_relations: List of ForiegnKeyRelation tuples for given schema.
+    fk_relations: List of ForeignKeyRelation tuples for given schema.
 
   Returns:
     List of SqlSpan tuples with fully specified FROM clause(s).

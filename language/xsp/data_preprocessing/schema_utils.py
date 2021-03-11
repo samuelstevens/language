@@ -125,7 +125,12 @@ def column_is_foreign_key(column):
         if foreign_key in {"y", "n", "yes", "no", "-"}:
             foreign_key = foreign_key in {"y", "yes"}
         else:
-            raise ValueError("Foreign key should be a boolean: " + foreign_key)
+            raise ValueError(
+                "Foreign key should be a boolean: "
+                + foreign_key
+                + ". Context: "
+                + str(column)
+            )
 
     return foreign_key
 

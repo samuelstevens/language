@@ -41,7 +41,11 @@ def main(unused_argv):
                         gold_query = (
                             NLToSQLExample().from_json(json.loads(line)).gold_sql_query
                         )
-                        new_symbols = [token.symbol for token in gold_query.actions if token.symbol and token.symbol not in vocabulary]
+                        new_symbols = [
+                            token.symbol
+                            for token in gold_query.actions
+                            if token.symbol and token.symbol not in vocabulary
+                        ]
                         if new_symbols:
                             print(new_symbols)
                         for token in gold_query.actions:

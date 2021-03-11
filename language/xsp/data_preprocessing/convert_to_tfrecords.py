@@ -218,6 +218,7 @@ class ConvertToSequenceExampleDoFn(beam.DoFn):
                     input_tokens, output_actions, example.model_input.original_utterance
                 ).SerializeToString()
             )
+
         return results
 
     def process(self, example):

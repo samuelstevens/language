@@ -95,7 +95,9 @@ class NLToSQLExample(object):
         return " ".join(gold_query)
 
     def __repr__(self):
-        return f"(model_input: {self.model_input}, gold_sql_query: {self.gold_sql_query})"
+        return (
+            f"(model_input: {self.model_input}, gold_sql_query: {self.gold_sql_query})"
+        )
 
 
 def populate_utterance(example, utterance, schema, tokenizer):

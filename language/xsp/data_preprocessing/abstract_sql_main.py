@@ -74,7 +74,7 @@ def _get_abstract_sql(gold_sql, foreign_keys, table_schema, restore_from_clause)
 
 def main(unused_argv):
     table_json = _load_json(FLAGS.tables)
-    # Map of database id to a list of ForiegnKeyRelation tuples.
+    # Map of database id to a list of ForeignKeyRelation tuples.
     foreign_key_map = abstract_sql_converters.spider_foreign_keys_map(table_json)
     table_schema_map = abstract_sql_converters.spider_table_schemas_map(table_json)
 

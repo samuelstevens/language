@@ -57,7 +57,7 @@ flags.DEFINE_string("michigan_data_dir", "", "Path to michigan /data directory."
 flags.DEFINE_string("dataset_name", "", "Name of dataset.")
 flags.DEFINE_list("splits", None, "The splits to count examples for.")
 flags.DEFINE_bool(
-    "use_oracle_foriegn_keys",
+    "use_oracle_foreign_keys",
     True,
     "Whether to use oracle foreign keys when restoring from asql.",
 )
@@ -81,7 +81,7 @@ def compute_michigan_coverage():
         FLAGS.michigan_data_dir, "%s.json" % dataset_file_prefix
     )
     schema = michigan_preprocessing.read_schema(schema_csv_path)
-    if FLAGS.use_oracle_foriegn_keys:
+    if FLAGS.use_oracle_foreign_keys:
         foreign_keys = abstract_sql_converters.michigan_db_to_foreign_key_tuples_orcale(
             FLAGS.dataset_name
         )

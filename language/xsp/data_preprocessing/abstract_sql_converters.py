@@ -335,7 +335,7 @@ def michigan_db_to_table_tuples(db):
 
 
 def spider_db_to_foreign_key_tuples(db):
-    """Return list of abstract_sql.ForiegnKeyRelation."""
+    """Return list of abstract_sql.ForeignKeyRelation."""
     # The format of the db json object is documented here:
     # https://github.com/taoyds/spider#tables
     # List of string table names.
@@ -627,6 +627,9 @@ def michigan_db_to_foreign_key_tuples_orcale(dataset_name):
                 "location", "restaurant", "restaurant_id", "id"
             ),
             abstract_sql.ForeignKeyRelation(
+                "location", "geographic", "city_name", "city_name"
+            ),
+            abstract_sql.ForeignKeyRelation(
                 "geographic", "restaurant", "city_name", "city_name"
             ),
         ]
@@ -645,10 +648,12 @@ def michigan_db_to_foreign_key_tuples_orcale(dataset_name):
             abstract_sql.ForeignKeyRelation(
                 "dataset", "paperdataset", "datasetid", "datasetid"
             ),
+            # samuelstevens: not sure what this relation is for.
             abstract_sql.ForeignKeyRelation("writes", "writes", "paperid", "paperid"),
             abstract_sql.ForeignKeyRelation(
                 "paper", "paperdataset", "paperid", "paperid"
             ),
+            # samuelstevens: this was most likely added because the abstract_sql code cannot find paths between tables with implicit tables (not mentioned in the query). There's an open TODO(petershaw) in regards to this limitation.
             abstract_sql.ForeignKeyRelation(
                 "paperdataset", "paperkeyphrase", "paperid", "paperid"
             ),
@@ -759,7 +764,7 @@ def wikisql_table_schemas_map(schema):
 
 
 def spider_foreign_keys_map(schema):
-    """Returns map of database id to a list of ForiegnKeyRelation tuples."""
+    """Returns map of database id to a list of ForeignKeyRelation tuples."""
     # The format of the schema json object is documented here:
     # https://github.com/taoyds/spider#tables
     return {db["db_id"]: spider_db_to_foreign_key_tuples(db) for db in schema}
@@ -792,18 +797,19 @@ def populate_abstract_sql(example, sql_string, table_schemas, anonymize):
 
 
 def restore_predicted_sql(sql_string, table_schemas, foreign_keys):
-    """Restore FROM clause in predicted SQL.
+    """
+    Restore FROM clause in predicted SQL.
 
-  TODO(petershaw): Add call to this function from run_inference.py.
+    TODO(petershaw): Add call to this function from run_inference.py.
 
-  Args:
-    sql_string: SQL query as string.
-    table_schemas: List of TableSchema tuples.
-    foreign_keys: List of ForeignKeyRelation tuples.
+    Args:
+        sql_string: SQL query as string.
+        table_schemas: List of TableSchema tuples.
+        foreign_keys: List of ForeignKeyRelation tuples.
 
-  Returns:
-    SQL query with restored FROM clause as a string.
-  """
+    Returns:
+        SQL query with restored FROM clause as a string.
+    """
     sql_spans = abstract_sql.sql_to_sql_spans(
         sql_string, table_schemas, lowercase=False
     )
