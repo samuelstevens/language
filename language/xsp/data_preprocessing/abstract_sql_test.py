@@ -57,6 +57,13 @@ class AbstractSqlTest(absltest.TestCase):
         )
         self.assertEqual(expected_sql, abstract_sql.sql_spans_to_string(replaced_spans))
 
+    def test_remove_from_clause_multiple_joins(self):
+        query = "select business.name , user.name from business join review on business.business_id = review.business_id join user on review.user_id = user.user_id where user.name = 'drake'"
+        sql_spans = abstract_sql.sql_to_sql_spans(query)
+        replaced_spans = abstract_sql.replace_from_clause(sql_spans)
+        expected_sql = "select business.name , user.name <from_clause_placeholder> review where user.name = 'drake'"
+        self.assertEqual(expected_sql, abstract_sql.sql_spans_to_string(replaced_spans))
+
     def test_restore_from_clause(self):
         fk_relations = [
             abstract_sql.ForeignKeyRelation("user_profiles", "follows", "uid", "f1")
@@ -71,6 +78,23 @@ class AbstractSqlTest(absltest.TestCase):
             "join user_profiles on follows.f1 = user_profiles.uid where"
             " user_profiles.name = 'tyler swift' )"
         )
+        self.assertEqual(expected_sql, abstract_sql.sql_spans_to_string(restored_spans))
+
+    def test_restore_from_clause_with_implicit_tables(self):
+        fk_relations = [
+            abstract_sql.ForeignKeyRelation("user", "review", "user_id", "user_id"),
+            abstract_sql.ForeignKeyRelation(
+                "business", "review", "business_id", "business_id"
+            ),
+        ]
+
+        sql_uf_query = "select business.name , user.name <from_clause_placeholder> where user.name = 'drake'"
+        sql_spans = abstract_sql.sql_to_sql_spans(sql_uf_query)
+        self.assertEqual(
+            sql_uf_query, abstract_sql.sql_spans_to_string(sql_spans),
+        )
+        restored_spans = abstract_sql.restore_from_clause(sql_spans, fk_relations)
+        expected_sql = "select business.name , user.name from business join review on business.business_id = review.business_id join user on review.user_id = user.user_id where user.name = 'drake'"
         self.assertEqual(expected_sql, abstract_sql.sql_spans_to_string(restored_spans))
 
     def test_nested_sql_with_unqualified_column(self):
@@ -266,6 +290,26 @@ class AbstractSqlTest(absltest.TestCase):
         replaced = abstract_sql.sql_spans_to_string(replaced_spans, sep=" ")
         expected = "select foo.name <from_clause_placeholder> bar"
         self.assertEqual(expected, replaced)
+
+    def test_bfs_easy(self):
+        unvisited = ["D"]
+        visited = ["C"]
+        relations = {("D", "B"): ("fish", "fish"), ("B", "C"): ("cat", "cat")}
+        path = abstract_sql._shortest_path(unvisited, visited, relations)
+        expected = [("D", "B"), ("B", "C")]
+        self.assertEqual(expected, path)
+
+    def test_bfs(self):
+        unvisited = ["A", "D"]
+        visited = ["C"]
+        relations = {
+            ("A", "D"): ("dog", "dog"),
+            ("D", "B"): ("fish", "fish"),
+            ("B", "C"): ("cat", "cat"),
+        }
+        path = abstract_sql._shortest_path(unvisited, visited, relations)
+        expected = [("D", "B"), ("B", "C")]
+        self.assertEqual(expected, path)
 
 
 if __name__ == "__main__":

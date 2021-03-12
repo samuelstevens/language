@@ -23,7 +23,18 @@ TODO(petershaw): A proper parser and grammar for SQL would improve robustness!
 from __future__ import absolute_import, division, print_function
 
 import collections
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Deque,
+    Dict,
+    List,
+    Mapping,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 import sqlparse
 
@@ -49,22 +60,47 @@ BAD_SQL = [
     ),
 ]
 
-"""
-This represents either a single token/identifier in the SQL query, or a sequence of tokens representing a nested statement.
-Nested statements can appear in constructions using EXCLUDE, INTERSECTION, and UNION, or can appear in WHERE clauses such as IN (...).
-A list of SqlSpan tuples represents an entire SQL query.
-Only one of the fields should be non-None.
-"""
-SqlSpan = collections.namedtuple(
-    "SqlSpan",
-    [
-        "sql_token",  # Special SQL token from output vocabulary.
-        "value_literal",  # Literal copied from query.
-        "column",  # SqlColumn tuple.
-        "table_name",  # String table name.
-        "nested_statement",  # List of SqlSpan tuples for nested statement.
-    ],
-)
+# Represents a column.
+SqlColumn = NamedTuple("SqlColumn", [("column_name", str), ("table_name", str)])
+
+
+class SqlSpan:
+    """
+    This represents either a single token/identifier in the SQL query, or a sequence of tokens representing a nested statement.
+    Nested statements can appear in constructions using EXCLUDE, INTERSECTION, and UNION, or can appear in WHERE clauses such as IN (...).
+    A list of SqlSpan tuples represents an entire SQL query.
+    *Only one of the fields can be non-None* TODO(samuelstevens): encode this constraint in the type system somehow.
+    """
+
+    sql_token: Any  # Special SQL token from output vocabulary.
+    value_literal: Any  # Literal copied from query.
+    column: SqlColumn
+    table_name: str
+    nested_statement: List["SqlSpan"]
+
+    def __init__(
+        self,
+        sql_token=None,
+        value_literal=None,
+        column=None,
+        table_name=None,
+        nested_statement=None,
+    ):
+        """SqlSpan constructor where only one argument should be non-None."""
+
+        args = [sql_token, value_literal, column, table_name, nested_statement]
+        if sum(arg is not None for arg in args) != 1:
+            raise ParseError("Only one argument should be set: %s" % args)
+
+        self.sql_token = sql_token
+        self.value_literal = value_literal
+        self.column = column
+        self.table_name = table_name
+        self.nested_statement = nested_statement
+
+    def __str__(self) -> str:
+        return repr(self)
+
 
 # Represents a table and its alias in a query.
 SqlTable = collections.namedtuple("SqlTable", ["table_name", "alias"])
@@ -78,17 +114,14 @@ TableSchema = collections.namedtuple(
     ],
 )
 
-# Represents a column.
-SqlColumn = collections.namedtuple("SqlColumn", ["column_name", "table_name"])
-
 # Represents a foreign-key relation between 2 tables.
-ForeignKeyRelation = collections.namedtuple(
+ForeignKeyRelation = NamedTuple(
     "ForeignKeyRelation",
     [
-        "child_table",  # String name of child table.
-        "parent_table",  # String name of parent table.
-        "child_column",  # String name of child column to join on.
-        "parent_column",  # String name of parent column to join on.
+        ("child_table", str),  # String name of child table.
+        ("parent_table", str),  # String name of parent table.
+        ("child_column", str),  # String name of child column to join on.
+        ("parent_column", str),  # String name of parent column to join on.
     ],
 )
 
@@ -108,19 +141,10 @@ class UnsupportedSqlError(Exception):
     pass
 
 
-def make_sql_span(
-    sql_token=None,
-    value_literal=None,
-    column=None,
-    table_name=None,
-    nested_statement=None,
-):
-    """SqlSpan constructor where only one argument should be non-None."""
+class NoPathError(Exception):
+    """If there is no path between an unvisited table and a visited table"""
 
-    args = [sql_token, value_literal, column, table_name, nested_statement]
-    if sum(arg is not None for arg in args) != 1:
-        raise ParseError("Only one argument should be set: %s" % args)
-    return SqlSpan(*args)
+    pass
 
 
 def _get_tables(tokens):
@@ -273,14 +297,14 @@ def _add_column_spans(
             sql_column = _get_sql_column(
                 column_token, tables, aliases_to_table_names, table_schemas
             )
-            sql_spans.append(make_sql_span(column=sql_column))
-            sql_spans.append(make_sql_span(sql_token=suffix.strip()))
+            sql_spans.append(SqlSpan(column=sql_column))
+            sql_spans.append(SqlSpan(sql_token=suffix.strip()))
             return
     # Otherwise handle normal case of no suffix.
     sql_column = _get_sql_column(
         column_token, tables, aliases_to_table_names, table_schemas
     )
-    sql_spans.append(make_sql_span(column=sql_column))
+    sql_spans.append(SqlSpan(column=sql_column))
 
 
 def _get_sql_table(token_value):
@@ -318,17 +342,17 @@ def _populate_spans_for_token(
         if isinstance(token, list):
             nested_spans = []
             _populate_spans_for_statement(token, nested_spans, table_schemas)
-            sql_spans.append(make_sql_span(nested_statement=nested_spans))
+            sql_spans.append(SqlSpan(nested_statement=nested_spans))
             previous_token = None
             continue
 
         if _is_underspecified_table_mention(previous_token, token):
             for token_value in token.value.split(" "):
                 sql_table = _get_sql_table(token_value)
-                sql_spans.append(make_sql_span(table_name=sql_table.table_name))
+                sql_spans.append(SqlSpan(table_name=sql_table.table_name))
         elif _is_table_mention(previous_token, token, in_from_clause_context):
             sql_table = _get_sql_table(token.value)
-            sql_spans.append(make_sql_span(table_name=sql_table.table_name))
+            sql_spans.append(SqlSpan(table_name=sql_table.table_name))
             is_table_mention = True
         elif _is_column_mention(token):
             _add_column_spans(
@@ -339,11 +363,11 @@ def _populate_spans_for_token(
                 token, tables, aliases_to_table_names, table_schemas, sql_spans
             )
         elif _is_value_literal(token):
-            sql_spans.append(make_sql_span(value_literal=token.value))
+            sql_spans.append(SqlSpan(value_literal=token.value))
         else:
             # Otherwise, assume token is a SQL token.
             # TODO(petershaw): Consider not splitting (*).
-            sql_spans.append(make_sql_span(sql_token=token.value))
+            sql_spans.append(SqlSpan(sql_token=token.value))
 
         if is_table_mention or in_from_clause_context and token.value == ",":
             in_from_clause_context = True
@@ -515,9 +539,13 @@ def sql_spans_to_string(sql_spans, sep=" "):
     return sep.join(strings)
 
 
-def _get_table_names_from_columns(sql_spans):
-    """Return set of table names of SqlColumn tuples in sql_spans."""
-    table_names_from_columns = set()
+def _get_table_names_from_columns(sql_spans: Sequence[SqlSpan]) -> Set[str]:
+    """
+    Return set of table names of SqlColumn tuples in sql_spans.
+
+    Finds all columns not in a FROM clause
+    """
+    table_names_from_columns: Set[str] = set()
     in_from_clause = False
     for span in sql_spans:
         if in_from_clause:
@@ -536,8 +564,12 @@ def _get_table_names_from_columns(sql_spans):
     return table_names_from_columns
 
 
-def _get_tables_without_column_copies(sql_spans):
-    """Returns a list of table names with no corresponding column copies."""
+def _get_tables_without_column_copies(sql_spans: Sequence[SqlSpan]) -> List[str]:
+    """
+    Returns a list of table names with no corresponding column copies.
+
+    These are table names only referenced in a FROM clause (not in WHERE, ORDER BY, SELECT, etc.)
+    """
     table_names_from_columns = _get_table_names_from_columns(sql_spans)
     orphaned_tables = []
     for span in sql_spans:
@@ -551,14 +583,15 @@ def _get_tables_without_column_copies(sql_spans):
 
 
 def replace_from_clause(sql_spans):
-    """Replace fully-specified FROM clause(s) with under-specified FROM clause(s).
+    """
+    Replace fully-specified FROM clause(s) with under-specified FROM clause(s).
 
-  Arguments:
-    sql_spans: List of SqlSpan tuples with fully-specified FROM clause.
+    Arguments:
+        sql_spans: List of SqlSpan tuples with fully-specified FROM clause.
 
-  Returns:
-    List of SqlSpan tuples with under-specified FROM clause.
-  """
+    Returns:
+        List of SqlSpan tuples with under-specified FROM clause.
+    """
     replaced_spans = []
     orphaned_tables = _get_tables_without_column_copies(sql_spans)
     # TODO(petershaw): Consider throwing exception if we never find from clause
@@ -576,30 +609,118 @@ def replace_from_clause(sql_spans):
         else:
             if span.sql_token and span.sql_token.lower() == "from":
                 in_from_clause = True
-                # Add placeholder and orphoned tables.
-                replaced_spans.append(make_sql_span(sql_token=FROM_CLAUSE_PLACEHOLDER))
+                # Add placeholder and orphaned tables.
+                replaced_spans.append(SqlSpan(sql_token=FROM_CLAUSE_PLACEHOLDER))
                 for table_name in orphaned_tables:
-                    replaced_spans.append(make_sql_span(table_name=table_name))
+                    replaced_spans.append(SqlSpan(table_name=table_name))
         if not in_from_clause:
             if span.nested_statement:
                 # Recursively remove FROM clause from nested expression.
                 replaced_spans.append(
-                    make_sql_span(
-                        nested_statement=replace_from_clause(span.nested_statement)
-                    )
+                    SqlSpan(nested_statement=replace_from_clause(span.nested_statement))
                 )
             else:
                 replaced_spans.append(span)
     return replaced_spans
 
 
+class Node:
+    name: str
+    seen: bool
+    parent: Optional["Node"]
+
+    def __init__(self, name: str):
+        self.name = name
+        self.seen = False
+        self.parent = None
+
+    def path(self) -> List["Node"]:
+        if self.parent:
+            return self.parent.path() + [self]
+
+        return [self]
+
+    def __repr__(self) -> str:
+        if self.parent:
+            return f"Node({self.name}, seen: {self.seen}, {self.parent.name})"
+
+        return f"Node({self.name}, seen: {self.seen})"
+
+
+def _shortest_path(
+    unvisited_tables: List[str],
+    visited_tables: List[str],
+    relations: Mapping[Tuple[str, str], Tuple[str, str]],
+) -> List[Tuple[str, str]]:
+
+    # set up graph
+    edges = [(Node(a), Node(b)) for a, b in relations]
+    unvisited = set()
+    visited = set()
+
+    for a, b in edges:
+        if a.name in unvisited_tables:
+            unvisited.add(a)
+        if b.name in unvisited_tables:
+            unvisited.add(b)
+
+        if a.name in visited_tables:
+            visited.add(a)
+        if b.name in visited_tables:
+            visited.add(b)
+
+    best_path = None
+    for start in unvisited:
+        # Perform breadth-first search starting at start.
+        path = []
+        for a, b in edges:
+            a.parent, b.parent = None, None
+            a.seen, b.seen = False, False
+        queue = Deque([start])
+
+        while queue:
+            node = queue.pop()
+            if node.seen:
+                continue
+            node.seen = True
+            for a, b in edges:
+                if a.name == node.name and not b.seen:
+                    b.parent = node
+                    if b in visited:  # we're finished!
+                        path = b.path()
+                        break
+                    queue.append(b)
+                if b.name == node.name and not a.seen:
+                    a.parent = node
+                    if a in visited:  # we're finished!
+                        path = a.path()
+                        break
+                    queue.append(a)
+            if path:
+                break
+
+        if not path:
+            continue
+
+        if not best_path or len(path) < len(best_path):
+            best_path = path
+
+    if not best_path:
+        raise NoPathError(
+            "No path found between unvisited tables %s and visited tables %s with relations %s"
+            % (unvisited_tables, visited_tables, relations)
+        )
+
+    return [(a.name, b.name) for a, b in zip(best_path, best_path[1:])]
+
+
 def _get_fk_relations_helper(
     unvisited_tables,
     visited_tables,
     fk_relations_map: Mapping[Tuple[str, str], Tuple[str, str]],
-) -> Optional[Tuple[str, str]]:
+) -> List[Tuple[str, str]]:
     """
-    Returns a pair of column names connecting to an unvisited table, or None.
+    Returns a list of foreign key relations used to join two tables. First, single edge paths are joined, then if there are still unvisited tables, a graph is constructed.
 
     Modifies unvisited_tables and visited_tables.
     """
@@ -609,9 +730,26 @@ def _get_fk_relations_helper(
                 fk_relation = fk_relations_map[(table, table_to_visit)]
                 unvisited_tables.remove(table_to_visit)
                 visited_tables.append(table_to_visit)
-                return fk_relation
+                return [fk_relation]
 
-    return None
+    # If we reach this point, there are no single edge paths between visited and unvisited. Instead, we must construct a complete graph using all tables referenced in fk_relations_map.
+    path = _shortest_path(unvisited_tables, visited_tables, fk_relations_map)
+    col_names = []
+
+    for t1, t2 in path:
+        if t1 in unvisited_tables:
+            unvisited_tables.remove(t1)
+        if t1 not in visited_tables:
+            visited_tables.append(t1)
+
+        if t2 in unvisited_tables:
+            unvisited_tables.remove(t2)
+        if t2 not in visited_tables:
+            visited_tables.append(t2)
+
+        col_names.append(fk_relations_map[(t1, t2)])
+
+    return col_names
 
 
 def _get_fk_relations_linking_tables(
@@ -644,21 +782,19 @@ def _get_fk_relations_linking_tables(
     unvisited_tables = table_names[1:]
     fk_relations = []
     while unvisited_tables:
-        fk_relation = _get_fk_relations_helper(
-            unvisited_tables, visited_tables, fk_relations_map
-        )
-        if fk_relation:
-            fk_relations.append(fk_relation)
-        else:
-            # TODO(petershaw): Handle case where not all tables are mentioned, i.e.
-            # some tables need to be inferred to connect mentioned tables.
+        try:
+            relations = _get_fk_relations_helper(
+                unvisited_tables, visited_tables, fk_relations_map
+            )
+            fk_relations.extend(relations)
+        except NoPathError:
             raise UnsupportedSqlError(
                 "Couldn't find path between tables %s given relations %s."
-                % (table_names, fk_relations)
+                % (table_names, known_fk_relations)
             )
     # Length of fk_relations will be 1 shorter than visited tables.
     # samuelstevens: added assert to match original authors' comment above
-    assert len(visited_tables) - 1 == len(fk_relations), "Internal consistency error"
+    assert len(visited_tables) - 1 == len(fk_relations), f"Internal consistency error: {len(visited_tables)} is not 1 + {len(fk_relations)}"
     return visited_tables, fk_relations
 
 
@@ -670,26 +806,26 @@ def _get_from_clause_for_tables(
         table_names, known_fk_relations
     )
     sql_spans = []
-    sql_spans.append(make_sql_span(table_name=visited_tables[0]))
+    sql_spans.append(SqlSpan(table_name=visited_tables[0]))
     for i in range(len(visited_tables) - 1):
         table_a = visited_tables[i]
         table_b = visited_tables[i + 1]
         column_a, column_b = fk_relations[i]
         # join table_b on table_a.column_a = table_b.column_b
-        sql_spans.append(make_sql_span(sql_token="join"))
-        sql_spans.append(make_sql_span(table_name=table_b))
-        sql_spans.append(make_sql_span(sql_token="on"))
+        sql_spans.append(SqlSpan(sql_token="join"))
+        sql_spans.append(SqlSpan(table_name=table_b))
+        sql_spans.append(SqlSpan(sql_token="on"))
         sql_spans.append(
-            make_sql_span(column=SqlColumn(column_name=column_a, table_name=table_a))
+            SqlSpan(column=SqlColumn(column_name=column_a, table_name=table_a))
         )
-        sql_spans.append(make_sql_span(sql_token="="))
+        sql_spans.append(SqlSpan(sql_token="="))
         sql_spans.append(
-            make_sql_span(column=SqlColumn(column_name=column_b, table_name=table_b))
+            SqlSpan(column=SqlColumn(column_name=column_b, table_name=table_b))
         )
     return sql_spans
 
 
-def _get_all_table_names(sql_spans):
+def _get_all_table_names(sql_spans: Sequence[SqlSpan]) -> List[str]:
     """Returns set of all table names in sql_spans."""
     # Use a list to preserve some ordering.
     table_names = []
@@ -721,27 +857,27 @@ def _has_nested_from_clause(sql_spans):
 
 
 def restore_from_clause(sql_spans, fk_relations):
-    """Restores fully-specified FROM clause.
+    """
+    Restores fully-specified FROM clause.
 
-  Args:
-    sql_spans: List of SqlSpan tuples with underspecified FROM clause(s).
-    fk_relations: List of ForeignKeyRelation tuples for given schema.
+    Args:
+        sql_spans: List of SqlSpan tuples with underspecified FROM clause(s).
+        fk_relations: List of ForeignKeyRelation tuples for given schema.
 
-  Returns:
-    List of SqlSpan tuples with fully specified FROM clause(s).
-  Raises:
-    ParseError: If cannot find path between mentioned tables or other parsing
-        error.
-  """
+    Returns:
+        List of SqlSpan tuples with fully specified FROM clause(s).
+    Raises:
+        UnsupportedSqlError: If cannot find path between mentioned tables 
+    """
     # Sort the list to avoid non-determinism.
-    table_names = sorted(list(_get_all_table_names(sql_spans)))
+    table_names = sorted(_get_all_table_names(sql_spans))
     has_nested_from_clause = _has_nested_from_clause(sql_spans)
     restored_sql_spans = []
     in_from_clause = False
     for sql_span in sql_spans:
         if sql_span.nested_statement:
             restored_sql_spans.append(
-                make_sql_span(
+                SqlSpan(
                     nested_statement=restore_from_clause(
                         sql_span.nested_statement, fk_relations
                     )
@@ -754,7 +890,7 @@ def restore_from_clause(sql_spans, fk_relations):
                 in_from_clause = False
         else:
             if sql_span.sql_token and sql_span.sql_token == FROM_CLAUSE_PLACEHOLDER:
-                restored_sql_spans.append(make_sql_span(sql_token="from"))
+                restored_sql_spans.append(SqlSpan(sql_token="from"))
                 if not has_nested_from_clause:
                     restored_sql_spans.extend(
                         _get_from_clause_for_tables(table_names, fk_relations)
