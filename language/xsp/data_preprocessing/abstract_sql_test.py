@@ -80,7 +80,6 @@ class AbstractSqlTest(absltest.TestCase):
         )
         self.assertEqual(expected_sql, abstract_sql.sql_spans_to_string(restored_spans))
 
-    @absltest.skip("Not going to work until shortest_paths is finished")
     def test_restore_from_clause_with_implicit_tables(self):
         fk_relations = [
             abstract_sql.ForeignKeyRelation("user", "review", "user_id", "user_id"),
@@ -95,7 +94,7 @@ class AbstractSqlTest(absltest.TestCase):
             sql_uf_query, abstract_sql.sql_spans_to_string(sql_spans),
         )
         restored_spans = abstract_sql.restore_from_clause(sql_spans, fk_relations)
-        expected_sql = "select business.name , user.name from business join user on review.user_id = user.user_id join review on review.business_id = business.business_id where user.name = 'drake'"
+        expected_sql = "select business.name , user.name from business join review on business.business_id = review.business_id join user on review.user_id = user.user_id where user.name = 'drake'"
         self.assertEqual(expected_sql, abstract_sql.sql_spans_to_string(restored_spans))
 
     def test_nested_sql_with_unqualified_column(self):
@@ -183,12 +182,7 @@ class AbstractSqlTest(absltest.TestCase):
             parsed_spans, fk_relations=fk_relations
         )
         restored_sql = abstract_sql.sql_spans_to_string(restored_spans)
-        expected_restored_sql = (
-            "select user_profiles.name from follows join user_profiles on "
-            "follows.f1 = user_profiles.uid group by follows.f1 having count ( * )"
-            " > ( select count ( * ) from follows join user_profiles on follows.f1"
-            " = user_profiles.uid where user_profiles.name = 'tyler swift' )"
-        )
+        expected_restored_sql = "select user_profiles.name from follows join user_profiles on follows.f1 = user_profiles.uid group by follows.f1 having count ( * ) > ( select count ( * ) from follows join user_profiles on follows.f1 = user_profiles.uid where user_profiles.name = 'tyler swift' )"
         self.assertEqual(expected_restored_sql, restored_sql)
 
     def test_restore_from_string_no_tables(self):
@@ -264,12 +258,12 @@ class AbstractSqlTest(absltest.TestCase):
         from_clause_spans = abstract_sql._get_from_clause_for_tables(tables, relations)
         from_clause = abstract_sql.sql_spans_to_string(from_clause_spans, sep=" ")
         expected_from_clause = (
-            "author join domain_author on author.aid = "
-            "domain_author.aid join domain on domain_author.did"
-            " = domain.did join organization on domain.oid = "
-            "organization.oid join writes on organization.aid ="
-            " writes.aid join publication on writes.pid = "
-            "publication.pid"
+            "author "
+            "join domain_author on author.aid = domain_author.aid "
+            "join organization on author.oid = organization.oid "
+            "join writes on author.aid = writes.aid "
+            "join domain on domain.did = domain_author.did "
+            "join publication on publication.pid = writes.pid"
         )
         self.assertEqual(expected_from_clause, from_clause)
 
@@ -292,79 +286,25 @@ class AbstractSqlTest(absltest.TestCase):
         expected = "select foo.name <from_clause_placeholder> bar"
         self.assertEqual(expected, replaced)
 
-    def test_bfs_easy(self):
-        unvisited = ["D"]
-        visited = ["C"]
-        relations = {("D", "B"): ("fish", "fish"), ("B", "C"): ("cat", "cat")}
-        path = abstract_sql._shortest_path(unvisited, visited, relations)
-        expected = [("D", "B"), ("B", "C")]
-        self.assertEqual(expected, path)
-
-    def test_bfs(self):
-        unvisited = ["A", "D"]
-        visited = ["C"]
-        relations = {
-            ("A", "D"): ("dog", "dog"),
-            ("D", "B"): ("fish", "fish"),
-            ("B", "C"): ("cat", "cat"),
-        }
-        path = abstract_sql._shortest_path(unvisited, visited, relations)
-        expected = [("D", "B"), ("B", "C")]
-        self.assertEqual(expected, path)
-
-    def test_bfs_no_path(self):
-        unvisited = ["D"]
-        visited = ["C"]
-        relations = {("D", "B"): ("fish", "fish")}
-        with self.assertRaises(abstract_sql.NoPathError):
-            abstract_sql._shortest_path(unvisited, visited, relations)
-
-    def test_shortest_path(self):
-        elements = ["A", "B", "C", "D"]
-        edges = [("A", "D"), ("D", "B"), ("B", "C")]
-        paths = abstract_sql._shortest_paths_between_all_nodes(elements, edges)
-        expected = {
-            ("A", "A"): ["A"],
-            ("A", "B"): ["A", "D", "B"],
-            ("A", "C"): ["A", "D", "B", "C"],
-            ("A", "D"): ["A", "D"],
-            ("B", "A"): ["B", "D", "A"],
-            ("B", "B"): ["B"],
-            ("B", "C"): ["B", "C"],
-            ("B", "D"): ["B", "D"],
-            ("C", "A"): ["C", "B", "D", "A"],
-            ("C", "B"): ["C", "B"],
-            ("C", "C"): ["C"],
-            ("C", "D"): ["C", "B", "D"],
-            ("D", "A"): ["D", "A"],
-            ("D", "B"): ["D", "B"],
-            ("D", "C"): ["D", "B", "C"],
-            ("D", "D"): ["D"],
-        }
-        self.assertEqual(expected, paths)
-
     def test_steiner_tree(self):
-        elements = ["A", "B", "C", "D"]
         edges = [("A", "D"), ("D", "B"), ("B", "C")]
-        terminals = {"A", "D", "C"}
-        tree = abstract_sql._steiner_tree(elements, edges, terminals)
+        terminals = set("ADC")
+        tree = abstract_sql._steiner_tree(edges, terminals)
         expected = set(edges)
         self.assertEqual(expected, tree)
 
     def test_steiner_tree_not_all_edges(self):
-        elements = ["A", "B", "C", "D"]
         edges = [("A", "D"), ("D", "B"), ("B", "C")]
-        terminals = {"D", "C"}
-        tree = abstract_sql._steiner_tree(elements, edges, terminals)
+        terminals = set("DC")
+        tree = abstract_sql._steiner_tree(edges, terminals)
         expected = {("D", "B"), ("B", "C")}
         self.assertEqual(expected, tree)
 
     def test_steiner_tree_harder(self):
-        elements = list("ABCDE")
-        edges = [('A', 'B'), ('A', 'D'), ('B', 'D'), ('C', 'D'), ('C', 'E')]
-        terminals = list("ADE")
-        tree = abstract_sql._steiner_tree(elements, edges, terminals)
-        expected = {('A', 'D'), ('C', 'D'), ('C', 'E')}
+        edges = [("A", "B"), ("A", "D"), ("B", "D"), ("C", "D"), ("C", "E")]
+        terminals = set("ADE")
+        tree = abstract_sql._steiner_tree(edges, terminals)
+        expected = {("A", "D"), ("C", "D"), ("C", "E")}
         self.assertEqual(expected, tree)
 
 

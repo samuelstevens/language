@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Lint as: python3
-"""Self-contained library for converting SQL w/ under-specified FROM clause.
+"""
+Self-contained library for converting SQL w/ under-specified FROM clause.
 
 This module relies on the sqlparse library, which is a non-validating
 SQL parser, and additional heuristics.
@@ -26,7 +27,6 @@ import collections
 import copy
 from typing import (
     Any,
-    Deque,
     Dict,
     List,
     Mapping,
@@ -38,7 +38,6 @@ from typing import (
     TypeVar,
 )
 
-import numpy as np
 import sqlparse
 
 from language.xsp.data_preprocessing import sqlparse_keyword_utils
@@ -77,17 +76,17 @@ class SqlSpan:
 
     sql_token: Any  # Special SQL token from output vocabulary.
     value_literal: Any  # Literal copied from query.
-    column: SqlColumn
-    table_name: str
-    nested_statement: List["SqlSpan"]
+    column: Optional[SqlColumn]
+    table_name: Optional[str]
+    nested_statement: Optional[List["SqlSpan"]]
 
     def __init__(
         self,
-        sql_token=None,
-        value_literal=None,
-        column=None,
-        table_name=None,
-        nested_statement=None,
+        sql_token: Any = None,
+        value_literal: Any = None,
+        column: Optional[SqlColumn] = None,
+        table_name: Optional[str] = None,
+        nested_statement: Optional[List["SqlSpan"]] = None,
     ):
         """SqlSpan constructor where only one argument should be non-None."""
 
@@ -391,7 +390,7 @@ def _populate_spans_for_statement(grouped_tokens, sql_spans, table_schemas):
     )
 
 
-def _find_statement_end_idx(tokens, start_idx):
+def _find_statement_end_idx(tokens, start_idx) -> int:
     """Return end index of nested statement starting at start_idx."""
     open_parens = 0
     for idx in range(start_idx, len(tokens)):
@@ -525,7 +524,7 @@ def sql_to_sql_spans(sql_string, table_schemas=None, lowercase=True):
     return sql_spans
 
 
-def sql_spans_to_string(sql_spans, sep=" "):
+def sql_spans_to_string(sql_spans: Sequence[SqlSpan], sep: str = " ") -> str:
     """Converts list of SqlSpan tuples to string."""
     strings = []
     for span in sql_spans:
@@ -585,7 +584,7 @@ def _get_tables_without_column_copies(sql_spans: Sequence[SqlSpan]) -> List[str]
     return orphaned_tables
 
 
-def replace_from_clause(sql_spans):
+def replace_from_clause(sql_spans: Sequence[SqlSpan]) -> List[SqlSpan]:
     """
     Replace fully-specified FROM clause(s) with under-specified FROM clause(s).
 
@@ -640,11 +639,47 @@ def _construct_path(start: T, end: T, parents: Mapping[T, T]) -> List[T]:
     return list(reversed(path))
 
 
-def _steiner_tree(vertices, edges, terminals: Set[T]) -> Set[Tuple[T, T]]:
+def _connected_tree(tree: List[Tuple[T, T]], adjacency: Mapping[T, Set[T]]) -> bool:
+    # to check that the tree is connected, perform breadth-first search and ensure that all nodes are marked as 'seen'
+    if len(tree) <= 1:
+        return True
+
+    seen = set()
+    stack = [tree[0][0]]  # first element of the first edge (arbitrary)
+
+    while stack:
+        node = stack.pop()
+        for neighbor in adjacency[node]:
+            if (
+                (node, neighbor) not in tree
+                and (neighbor, node) not in tree
+                or neighbor in seen
+            ):
+                continue
+
+            seen.add(neighbor)
+            stack.append(neighbor)
+
+    referenced_nodes = {first for first, _ in tree} | {second for _, second in tree}
+    return len(seen) == len(referenced_nodes)
+
+
+def _contains_all_terminals(tree: Sequence[Tuple[T, T]], terminals: Set[T]) -> bool:
+    seen_terminals = copy.copy(terminals)
+    for a, b in tree:
+        if a in seen_terminals:
+            seen_terminals.remove(a)
+        if b in seen_terminals:
+            seen_terminals.remove(b)
+
+    return not seen_terminals
+
+
+def _steiner_tree(edges: Sequence[Tuple[T, T]], terminals: Set[T]) -> Set[Tuple[T, T]]:
     """
     Given a graph, find a minimum size tree containing every terminal.
 
-    H = (V', E') is a subset of G such that T is a subset of V'
+    H = (V', E') is a subset of G such that T is a subset of V' (G.V not needed)
 
     Since Steiner Tree is an NP-complete problem and our problem is small, I don't both with an efficient algorithm. The runtime is O(2^|E|).
     """
@@ -659,46 +694,6 @@ def _steiner_tree(vertices, edges, terminals: Set[T]) -> Set[Tuple[T, T]]:
             adjacency[b] = set()
         adjacency[b].add(a)
 
-    # predicates for success
-    def connected(tree) -> bool:
-        # to check that the tree is connected, perform breadth-first search and ensure that all nodes are marked as 'seen'
-        if len(tree) <= 1:
-            return True
-
-        seen = set()
-        root = tree[0][0]  # first element of the first edge (arbitrary)
-        stack = [root]
-
-        while stack:
-            node = stack.pop()
-            for neighbor in adjacency[node]:
-                if (node, neighbor) not in tree and (neighbor, node) not in tree:
-                    continue
-                if neighbor in seen:
-                    continue
-
-                seen.add(neighbor)
-                stack.append(neighbor)
-
-        referenced_nodes = {first for first, _ in tree} | {
-            second for _, second in tree
-        }
-        return len(seen) == len(referenced_nodes)
-
-    def all_terminals(tree) -> bool:
-        seen_terminals = copy.copy(terminals)
-        for a, b in tree:
-            if a in seen_terminals:
-                seen_terminals.remove(a)
-            if b in seen_terminals:
-                seen_terminals.remove(b)
-
-        return not seen_terminals
-
-    # metrics
-    def weight(tree) -> int:
-        return len(tree)
-
     best_tree = set(edges)
 
     for code in range(2 ** len(edges)):
@@ -707,175 +702,19 @@ def _steiner_tree(vertices, edges, terminals: Set[T]) -> Set[Tuple[T, T]]:
             if on_off == "1":
                 tree.append(edges[i])
 
-        if weight(tree) < weight(best_tree) and all_terminals(tree) and connected(tree):
+        if (
+            len(tree) < len(best_tree)
+            and _contains_all_terminals(tree, terminals)
+            and _connected_tree(tree, adjacency)
+        ):
             best_tree = set(tree)
 
     return best_tree
 
 
-def _shortest_paths_between_all_nodes(
-    elements: List[T], edges: Set[Tuple[T, T]]
-) -> Dict[Tuple[T, T], List[T]]:
-    n = len(elements)
-    distances = np.full((n + 1, n, n), np.inf)
-    parents = np.full((n + 1, n, n), -1)
-
-    for i, a in enumerate(elements):
-        for j, b in enumerate(elements):
-            if i == j:
-                distances[-1, i, j] = 0
-            else:
-                parents[-1, i, j] = i
-
-                if (a, b) in edges or (b, a) in edges:
-                    distances[-1, i, j] = distances[-1, j, i] = 1
-
-    for k in range(n):
-        for i, _ in enumerate(elements):
-            for j, _ in enumerate(elements):
-                distances[k, i, j] = min(
-                    distances[k - 1, i, j],
-                    distances[k - 1, i, k] + distances[k - 1, k, j],
-                )
-
-                parents[k, i, j] = (
-                    parents[k - 1, k, j]
-                    if distances[k, i, j] != distances[k - 1, i, j]
-                    else parents[k - 1, i, j]
-                )
-
-    paths = {}
-    for start_i, start in enumerate(elements):
-        for end_i, end in enumerate(elements):
-            if start_i == end_i:
-                paths[(start, end)] = [start]
-                continue
-
-            path = [end_i]
-            i = end_i
-            while parents[k, start_i, i] != start_i:
-                i = parents[k, start_i, i]
-                path.append(i)
-            path.append(start_i)
-
-            assert len(path) == distances[k, start_i, end_i] + 1
-            paths[(start, end)] = [elements[j] for j in reversed(path)]
-
-    return paths
-
-
-def _bfs(start: T, goals: Set[T], adjacency: Mapping[T, Set[T]]) -> List[T]:
-    """
-    Perform breadth-first search starting at start and ending at anything in goals.
-    """
-
-    seen: Set[T] = set()
-    parents: Dict[T, T] = {}
-
-    # 2. initialize the queue
-    queue = Deque([start])
-    seen.add(start)
-
-    while queue:
-        node = queue.pop()
-        assert node in seen
-
-        for neighbor in adjacency[node]:
-            if neighbor in seen:
-                continue
-            seen.add(neighbor)
-            parents[neighbor] = node
-            queue.append(neighbor)
-
-            if neighbor in goals:
-                return _construct_path(start, neighbor, parents)
-
-    raise NoPathError(
-        "No path from %s to goals %s via edges %s" % (start, goals, adjacency)
-    )
-
-
-def _shortest_path(
-    unvisited_tables: Sequence[str],
-    visited_tables: Sequence[str],
-    relations: Mapping[Tuple[str, str], Tuple[str, str]],
-) -> List[Tuple[str, str]]:
-    """
-    Finds the shortest path between any unvisited table and a visited table.
-
-    Performs a BFS starting at each unvisited table and ending when a visited table is reached and keeps track of the shortest path.
-    """
-
-    # set up graph
-    adjacency: Dict[str, Set[str]] = {}
-    for a, b in relations:
-        if a not in adjacency:
-            adjacency[a] = set()
-        adjacency[a].add(b)
-
-        if b not in adjacency:
-            adjacency[b] = set()
-        adjacency[b].add(a)
-
-    best_path = None
-
-    for start in unvisited_tables:
-        path = _bfs(start, set(visited_tables), adjacency)
-
-        if not best_path or len(path) < len(best_path):
-            best_path = path
-
-    if best_path is None:
-        # In practice this can only be raised if there are no unvisited tables, and the for loop is never entered.
-        raise NoPathError(
-            "No path found between unvisited tables %s and visited tables %s with relations %s"
-            % (unvisited_tables, visited_tables, relations)
-        )
-
-    return [(a, b) for a, b in zip(best_path, best_path[1:])]
-
-
-def _get_fk_relations_helper(
-    unvisited_tables,
-    visited_tables,
-    fk_relations_map: Mapping[Tuple[str, str], Tuple[str, str]],
-) -> List[Tuple[str, str]]:
-    """
-    Returns a list of foreign key relations used to join two tables. First, single edge paths are joined, then if there are still unvisited tables, a graph is constructed.
-
-    Modifies unvisited_tables and visited_tables.
-    """
-    for table_to_visit in unvisited_tables:
-        for table in visited_tables:
-            if (table, table_to_visit) in fk_relations_map:
-                fk_relation = fk_relations_map[(table, table_to_visit)]
-                unvisited_tables.remove(table_to_visit)
-                visited_tables.append(table_to_visit)
-                return [fk_relation]
-
-    # If we reach this point, there are no single edge paths between visited and unvisited. Instead, we must construct a graph using all tables referenced in fk_relations_map and find the shortest path between unvisited and visited tables.
-    path = _shortest_path(unvisited_tables, visited_tables, fk_relations_map)
-    col_names = []
-
-    for t1, t2 in path:
-        if t1 in unvisited_tables:
-            unvisited_tables.remove(t1)
-        if t1 not in visited_tables:
-            visited_tables.append(t1)
-
-        if t2 in unvisited_tables:
-            unvisited_tables.remove(t2)
-        if t2 not in visited_tables:
-            visited_tables.append(t2)
-
-        col_names.append(fk_relations_map[(t1, t2)])
-
-    return col_names
-
-
 def _get_fk_relations_linking_tables(
     table_names: Sequence[str], known_fk_relations: Sequence[ForeignKeyRelation]
-) -> Tuple[List[str], List[Tuple[str, str]]]:
+) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
     """
     Returns (List of visited table names, List of (col name, col name)).
     """
@@ -898,54 +737,65 @@ def _get_fk_relations_linking_tables(
             relation.child_column,
         )
 
-    # Greedily connect all tables using available foreign key relations.
-    # Artbirary choose the first table_name to start.
-    visited_tables = [table_names[0]]
-    unvisited_tables = table_names[1:]
-    fk_relations = []
-    while unvisited_tables:
-        try:
-            relations = _get_fk_relations_helper(
-                unvisited_tables, visited_tables, fk_relations_map
-            )
-            fk_relations.extend(relations)
-        except NoPathError:
-            raise UnsupportedSqlError(
-                "Couldn't find path between tables %s given relations %s."
-                % (table_names, known_fk_relations)
-            )
-    # Length of fk_relations will be 1 shorter than visited tables.
-    # samuelstevens: added assert to match original authors' comment above
-    assert len(visited_tables) - 1 == len(
-        fk_relations
-    ), f"Internal consistency error: {len(visited_tables)} is not 1 + {len(fk_relations)}"
-    return visited_tables, fk_relations
+    # Connect all tables using steiner tree (minimum tree spanning some vertices) with table_names as vertices and fk_relations_map.keys() as edges.
+    relationship_tree = _steiner_tree(list(fk_relations_map.keys()), set(table_names))
+    sorted_table_names: List[Tuple[str, str]] = list(sorted(tuple(sorted(edge)) for edge in relationship_tree))  # type: ignore
+    sorted_column_names = [fk_relations_map[pair] for pair in sorted_table_names]
+    return sorted_table_names, sorted_column_names
 
 
 def _get_from_clause_for_tables(
-    table_names: List[str], known_fk_relations: Sequence[ForeignKeyRelation]
-):
-    """Returns list of SqlSpan tuples for FROM clause."""
-    visited_tables, fk_relations = _get_fk_relations_linking_tables(
+    table_names: Sequence[str], known_fk_relations: Sequence[ForeignKeyRelation]
+) -> List[SqlSpan]:
+    """
+    Returns list of SqlSpan tuples for FROM clause.
+    """
+
+    if len(table_names) == 1:
+        return [SqlSpan(table_name=table_names[0])]
+
+    fk_tables, fk_cols = _get_fk_relations_linking_tables(
         table_names, known_fk_relations
     )
     sql_spans = []
-    sql_spans.append(SqlSpan(table_name=visited_tables[0]))
-    for i in range(len(visited_tables) - 1):
-        table_a = visited_tables[i]
-        table_b = visited_tables[i + 1]
-        column_a, column_b = fk_relations[i]
+    sql_spans.append(SqlSpan(table_name=fk_tables[0][0]))
+    referenced_tables: Set[str] = {fk_tables[0][0]}
+
+    for (table_a, table_b), (col_a, col_b) in zip(fk_tables, fk_cols):
+        # TODO(samuelstevens): refactor this code to remove duplication
+        if table_a in referenced_tables:
+            # join table_b on table_a.col_a = table_b.col_b
+            sql_spans.append(SqlSpan(sql_token="join"))
+            sql_spans.append(SqlSpan(table_name=table_b))
+            sql_spans.append(SqlSpan(sql_token="on"))
+            sql_spans.append(
+                SqlSpan(column=SqlColumn(column_name=col_a, table_name=table_a))
+            )
+            sql_spans.append(SqlSpan(sql_token="="))
+            sql_spans.append(
+                SqlSpan(column=SqlColumn(column_name=col_b, table_name=table_b))
+            )
+            referenced_tables.add(table_b)
+        elif table_b in referenced_tables:
+            # join table_a on table_a.col_a = table_b.col_b
+            sql_spans.append(SqlSpan(sql_token="join"))
+            sql_spans.append(SqlSpan(table_name=table_a))
+            sql_spans.append(SqlSpan(sql_token="on"))
+            sql_spans.append(
+                SqlSpan(column=SqlColumn(column_name=col_a, table_name=table_a))
+            )
+            sql_spans.append(SqlSpan(sql_token="="))
+            sql_spans.append(
+                SqlSpan(column=SqlColumn(column_name=col_b, table_name=table_b))
+            )
+            referenced_tables.add(table_a)
+
+        else:
+            raise RuntimeError(
+                f"Neither table {table_a} and table {table_b} have been referenced"
+            )
+
         # join table_b on table_a.column_a = table_b.column_b
-        sql_spans.append(SqlSpan(sql_token="join"))
-        sql_spans.append(SqlSpan(table_name=table_b))
-        sql_spans.append(SqlSpan(sql_token="on"))
-        sql_spans.append(
-            SqlSpan(column=SqlColumn(column_name=column_a, table_name=table_a))
-        )
-        sql_spans.append(SqlSpan(sql_token="="))
-        sql_spans.append(
-            SqlSpan(column=SqlColumn(column_name=column_b, table_name=table_b))
-        )
     return sql_spans
 
 
@@ -963,7 +813,7 @@ def _get_all_table_names(sql_spans: Sequence[SqlSpan]) -> List[str]:
     return table_names
 
 
-def _has_nested_from_clause(sql_spans):
+def _has_nested_from_clause(sql_spans: Sequence[SqlSpan]) -> bool:
     """Returns True if the outer sql statement has nested from clause."""
     previous_span_was_placeholder = False
     for sql_span in sql_spans:
@@ -980,7 +830,9 @@ def _has_nested_from_clause(sql_spans):
     return False
 
 
-def restore_from_clause(sql_spans, fk_relations):
+def restore_from_clause(
+    sql_spans: Sequence[SqlSpan], fk_relations: Sequence[ForeignKeyRelation]
+) -> List[SqlSpan]:
     """
     Restores fully-specified FROM clause.
 
