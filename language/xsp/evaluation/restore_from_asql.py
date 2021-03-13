@@ -78,7 +78,9 @@ def _get_restored_predictions(
     dataset_name=None,
     use_oracle_foreign_keys=False,
 ):
-    """Returns new predictions dict with FROM clauses restored."""
+    """
+    Returns new predictions dict with FROM clauses restored.
+    """
     utterance = predictions_dict["utterance"]
     if utterance_to_db_map:
         db = utterance_to_db_map[utterance]
@@ -113,7 +115,7 @@ def _get_restored_predictions(
             print("For query %s" % prediction)
             print("Unsupport Error: " + str(e))
         except abstract_sql.ParseError as e:
-            print("Parse Error!!!")
+            print("Parse Error: " + str(e))
         else:
             restored_predictions.append(restored_prediction)
             restored_scores.append(score)
@@ -132,27 +134,28 @@ def restore_from_clauses(
     spider_tables_json="",
     michigan_schema=None,
     dataset_name=None,
-    use_oracle_foriegn_keys=False,
+    use_oracle_foreign_keys=False,
 ):
-    """Loads an original dataset and matches with a predictions file.
+    """
+    Loads an original dataset and matches with a predictions file.
 
-  The input and output is a text file containing model predictions.
-  This is a newline-separated file of json-encoded predictions dictionary.
-  Each dictionary contains keys:
-  - `utterance` - The natural language query.
-  - `predictions` - List of predicted SQL string.
-  - `scores` - List of predicted scores.
+    The input and output is a text file containing model predictions.
+    This is a newline-separated file of json-encoded predictions dictionary.
+    Each dictionary contains keys:
+    - `utterance` - The natural language query.
+    - `predictions` - List of predicted SQL string.
+    - `scores` - List of predicted scores.
 
-  Args:
-    input_path: Path to input predictions.
-    output_path: Path to write output predictions.
-    spider_examples_json: Path to Spider examples.
-    spider_tables_json: Path to Spider tables.
-    michigan_schema: A Michigan schema object (list of tables, each with a list
-      of columns and their types).
-    dataset_name: Name of Michigan dataset if using oracle foreign keys.
-    use_oracle_foriegn_keys: Whether to use oracle foreign keys for Michigan.
-  """
+    Args:
+        input_path: Path to input predictions.
+        output_path: Path to write output predictions.
+        spider_examples_json: Path to Spider examples.
+        spider_tables_json: Path to Spider tables.
+        michigan_schema: A Michigan schema object (list of tables, each with a list
+          of columns and their types).
+        dataset_name: Name of Michigan dataset if using oracle foreign keys.
+        use_oracle_foreign_keys: Whether to use oracle foreign keys for Michigan.
+    """
     # Create map of utterances to schemas.
     utterance_to_db_map = None
     if spider_examples_json:
@@ -177,7 +180,7 @@ def restore_from_clauses(
                 utterance_to_db_map,
                 michigan_schema,
                 dataset_name,
-                use_oracle_foriegn_keys,
+                use_oracle_foreign_keys,
             )
         )
 
