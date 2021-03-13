@@ -23,6 +23,7 @@ TODO(petershaw): A proper parser and grammar for SQL would improve robustness!
 from __future__ import absolute_import, division, print_function
 
 import collections
+import copy
 from typing import (
     Any,
     Deque,
@@ -37,6 +38,7 @@ from typing import (
     TypeVar,
 )
 
+import numpy as np
 import sqlparse
 
 from language.xsp.data_preprocessing import sqlparse_keyword_utils
@@ -636,6 +638,130 @@ def _construct_path(start: T, end: T, parents: Mapping[T, T]) -> List[T]:
         current = parents[current]
 
     return list(reversed(path))
+
+
+def _steiner_tree(vertices, edges, terminals: Set[T]) -> Set[Tuple[T, T]]:
+    """
+    Given a graph, find a minimum size tree containing every terminal.
+
+    H = (V', E') is a subset of G such that T is a subset of V'
+
+    Since Steiner Tree is an NP-complete problem and our problem is small, I don't both with an efficient algorithm. The runtime is O(2^|E|).
+    """
+
+    adjacency: Dict[T, Set[T]] = {}
+    for a, b in edges:
+        if a not in adjacency:
+            adjacency[a] = set()
+        adjacency[a].add(b)
+
+        if b not in adjacency:
+            adjacency[b] = set()
+        adjacency[b].add(a)
+
+    # predicates for success
+    def connected(tree) -> bool:
+        # to check that the tree is connected, perform breadth-first search and ensure that all nodes are marked as 'seen'
+        if len(tree) <= 1:
+            return True
+
+        seen = set()
+        root = tree[0][0]  # first element of the first edge (arbitrary)
+        stack = [root]
+
+        while stack:
+            node = stack.pop()
+            for neighbor in adjacency[node]:
+                if (node, neighbor) not in tree and (neighbor, node) not in tree:
+                    continue
+                if neighbor in seen:
+                    continue
+
+                seen.add(neighbor)
+                stack.append(neighbor)
+
+        referenced_nodes = {first for first, _ in tree} | {
+            second for _, second in tree
+        }
+        return len(seen) == len(referenced_nodes)
+
+    def all_terminals(tree) -> bool:
+        seen_terminals = copy.copy(terminals)
+        for a, b in tree:
+            if a in seen_terminals:
+                seen_terminals.remove(a)
+            if b in seen_terminals:
+                seen_terminals.remove(b)
+
+        return not seen_terminals
+
+    # metrics
+    def weight(tree) -> int:
+        return len(tree)
+
+    best_tree = set(edges)
+
+    for code in range(2 ** len(edges)):
+        tree = []
+        for i, on_off in enumerate(reversed(bin(code)[2:])):
+            if on_off == "1":
+                tree.append(edges[i])
+
+        if weight(tree) < weight(best_tree) and all_terminals(tree) and connected(tree):
+            best_tree = set(tree)
+
+    return best_tree
+
+
+def _shortest_paths_between_all_nodes(
+    elements: List[T], edges: Set[Tuple[T, T]]
+) -> Dict[Tuple[T, T], List[T]]:
+    n = len(elements)
+    distances = np.full((n + 1, n, n), np.inf)
+    parents = np.full((n + 1, n, n), -1)
+
+    for i, a in enumerate(elements):
+        for j, b in enumerate(elements):
+            if i == j:
+                distances[-1, i, j] = 0
+            else:
+                parents[-1, i, j] = i
+
+                if (a, b) in edges or (b, a) in edges:
+                    distances[-1, i, j] = distances[-1, j, i] = 1
+
+    for k in range(n):
+        for i, _ in enumerate(elements):
+            for j, _ in enumerate(elements):
+                distances[k, i, j] = min(
+                    distances[k - 1, i, j],
+                    distances[k - 1, i, k] + distances[k - 1, k, j],
+                )
+
+                parents[k, i, j] = (
+                    parents[k - 1, k, j]
+                    if distances[k, i, j] != distances[k - 1, i, j]
+                    else parents[k - 1, i, j]
+                )
+
+    paths = {}
+    for start_i, start in enumerate(elements):
+        for end_i, end in enumerate(elements):
+            if start_i == end_i:
+                paths[(start, end)] = [start]
+                continue
+
+            path = [end_i]
+            i = end_i
+            while parents[k, start_i, i] != start_i:
+                i = parents[k, start_i, i]
+                path.append(i)
+            path.append(start_i)
+
+            assert len(path) == distances[k, start_i, end_i] + 1
+            paths[(start, end)] = [elements[j] for j in reversed(path)]
+
+    return paths
 
 
 def _bfs(start: T, goals: Set[T], adjacency: Mapping[T, Set[T]]) -> List[T]:

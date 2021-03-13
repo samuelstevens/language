@@ -21,17 +21,18 @@ import sqlparse
 
 
 def remove_bad_sqlparse_keywords():
-    """Removes keywords from the sqlparse keyword lists.
+    """
+    Removes keywords from the sqlparse keyword lists.
 
-  This is a relatively hacky solution (removing from the globally-scoped
-  internal keyword lists) but sqlparse does not offer an API for controlling
-  keywords.
+    This is a relatively hacky solution (removing from the globally-scoped
+    internal keyword lists) but sqlparse does not offer an API for controlling
+    keywords.
 
-  These keywords have to be removed because they are often used in Spider as
-  table or column names, and parsing therefore fails otherwise.
+    These keywords have to be removed because they are often used in Spider as
+    table or column names, and parsing therefore fails otherwise.
 
-  This fuction is designed to be safe if it is called more than once.
-  """
+    This fuction is designed to be safe if it is called more than once.
+    """
     for keyword in [
         "CAST",
         "CATALOG_NAME",

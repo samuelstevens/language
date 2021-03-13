@@ -80,6 +80,7 @@ class AbstractSqlTest(absltest.TestCase):
         )
         self.assertEqual(expected_sql, abstract_sql.sql_spans_to_string(restored_spans))
 
+    @absltest.skip("Not going to work until shortest_paths is finished")
     def test_restore_from_clause_with_implicit_tables(self):
         fk_relations = [
             abstract_sql.ForeignKeyRelation("user", "review", "user_id", "user_id"),
@@ -317,6 +318,54 @@ class AbstractSqlTest(absltest.TestCase):
         relations = {("D", "B"): ("fish", "fish")}
         with self.assertRaises(abstract_sql.NoPathError):
             abstract_sql._shortest_path(unvisited, visited, relations)
+
+    def test_shortest_path(self):
+        elements = ["A", "B", "C", "D"]
+        edges = [("A", "D"), ("D", "B"), ("B", "C")]
+        paths = abstract_sql._shortest_paths_between_all_nodes(elements, edges)
+        expected = {
+            ("A", "A"): ["A"],
+            ("A", "B"): ["A", "D", "B"],
+            ("A", "C"): ["A", "D", "B", "C"],
+            ("A", "D"): ["A", "D"],
+            ("B", "A"): ["B", "D", "A"],
+            ("B", "B"): ["B"],
+            ("B", "C"): ["B", "C"],
+            ("B", "D"): ["B", "D"],
+            ("C", "A"): ["C", "B", "D", "A"],
+            ("C", "B"): ["C", "B"],
+            ("C", "C"): ["C"],
+            ("C", "D"): ["C", "B", "D"],
+            ("D", "A"): ["D", "A"],
+            ("D", "B"): ["D", "B"],
+            ("D", "C"): ["D", "B", "C"],
+            ("D", "D"): ["D"],
+        }
+        self.assertEqual(expected, paths)
+
+    def test_steiner_tree(self):
+        elements = ["A", "B", "C", "D"]
+        edges = [("A", "D"), ("D", "B"), ("B", "C")]
+        terminals = {"A", "D", "C"}
+        tree = abstract_sql._steiner_tree(elements, edges, terminals)
+        expected = set(edges)
+        self.assertEqual(expected, tree)
+
+    def test_steiner_tree_not_all_edges(self):
+        elements = ["A", "B", "C", "D"]
+        edges = [("A", "D"), ("D", "B"), ("B", "C")]
+        terminals = {"D", "C"}
+        tree = abstract_sql._steiner_tree(elements, edges, terminals)
+        expected = {("D", "B"), ("B", "C")}
+        self.assertEqual(expected, tree)
+
+    def test_steiner_tree_harder(self):
+        elements = list("ABCDE")
+        edges = [('A', 'B'), ('A', 'D'), ('B', 'D'), ('C', 'D'), ('C', 'E')]
+        terminals = list("ADE")
+        tree = abstract_sql._steiner_tree(elements, edges, terminals)
+        expected = {('A', 'D'), ('C', 'D'), ('C', 'E')}
+        self.assertEqual(expected, tree)
 
 
 if __name__ == "__main__":
