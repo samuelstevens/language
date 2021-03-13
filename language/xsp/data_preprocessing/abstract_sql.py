@@ -34,6 +34,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TypeVar,
 )
 
 import sqlparse
@@ -624,94 +625,88 @@ def replace_from_clause(sql_spans):
     return replaced_spans
 
 
-class Node:
-    name: str
-    seen: bool
-    parent: Optional["Node"]
+T = TypeVar("T")
 
-    def __init__(self, name: str):
-        self.name = name
-        self.seen = False
-        self.parent = None
 
-    def path(self) -> List["Node"]:
-        if self.parent:
-            return self.parent.path() + [self]
+def _construct_path(start: T, end: T, parents: Mapping[T, T]) -> List[T]:
+    path = [end]
+    current = end
+    while current in parents:
+        path.append(parents[current])
+        current = parents[current]
 
-        return [self]
+    return list(reversed(path))
 
-    def __repr__(self) -> str:
-        if self.parent:
-            return f"Node({self.name}, seen: {self.seen}, {self.parent.name})"
 
-        return f"Node({self.name}, seen: {self.seen})"
+def _bfs(start: T, goals: Set[T], adjacency: Mapping[T, Set[T]]) -> List[T]:
+    """
+    Perform breadth-first search starting at start and ending at anything in goals.
+    """
+
+    seen: Set[T] = set()
+    parents: Dict[T, T] = {}
+
+    # 2. initialize the queue
+    queue = Deque([start])
+    seen.add(start)
+
+    while queue:
+        node = queue.pop()
+        assert node in seen
+
+        for neighbor in adjacency[node]:
+            if neighbor in seen:
+                continue
+            seen.add(neighbor)
+            parents[neighbor] = node
+            queue.append(neighbor)
+
+            if neighbor in goals:
+                return _construct_path(start, neighbor, parents)
+
+    raise NoPathError(
+        "No path from %s to goals %s via edges %s" % (start, goals, adjacency)
+    )
 
 
 def _shortest_path(
-    unvisited_tables: List[str],
-    visited_tables: List[str],
+    unvisited_tables: Sequence[str],
+    visited_tables: Sequence[str],
     relations: Mapping[Tuple[str, str], Tuple[str, str]],
 ) -> List[Tuple[str, str]]:
+    """
+    Finds the shortest path between any unvisited table and a visited table.
+
+    Performs a BFS starting at each unvisited table and ending when a visited table is reached and keeps track of the shortest path.
+    """
 
     # set up graph
-    edges = [(Node(a), Node(b)) for a, b in relations]
-    unvisited = set()
-    visited = set()
+    adjacency: Dict[str, Set[str]] = {}
+    for a, b in relations:
+        if a not in adjacency:
+            adjacency[a] = set()
+        adjacency[a].add(b)
 
-    for a, b in edges:
-        if a.name in unvisited_tables:
-            unvisited.add(a)
-        if b.name in unvisited_tables:
-            unvisited.add(b)
-
-        if a.name in visited_tables:
-            visited.add(a)
-        if b.name in visited_tables:
-            visited.add(b)
+        if b not in adjacency:
+            adjacency[b] = set()
+        adjacency[b].add(a)
 
     best_path = None
-    for start in unvisited:
-        # Perform breadth-first search starting at start.
-        path = []
-        for a, b in edges:
-            a.parent, b.parent = None, None
-            a.seen, b.seen = False, False
-        queue = Deque([start])
 
-        while queue:
-            node = queue.pop()
-            if node.seen:
-                continue
-            node.seen = True
-            for a, b in edges:
-                if a.name == node.name and not b.seen:
-                    b.parent = node
-                    if b in visited:  # we're finished!
-                        path = b.path()
-                        break
-                    queue.append(b)
-                if b.name == node.name and not a.seen:
-                    a.parent = node
-                    if a in visited:  # we're finished!
-                        path = a.path()
-                        break
-                    queue.append(a)
-            if path:
-                break
-
-        if not path:
-            continue
+    for start in unvisited_tables:
+        path = _bfs(start, set(visited_tables), adjacency)
 
         if not best_path or len(path) < len(best_path):
             best_path = path
 
-    if not best_path:
+    if best_path is None:
+        # In practice this can only be raised if there are no unvisited tables, and the for loop is never entered.
         raise NoPathError(
             "No path found between unvisited tables %s and visited tables %s with relations %s"
             % (unvisited_tables, visited_tables, relations)
         )
 
-    return [(a.name, b.name) for a, b in zip(best_path, best_path[1:])]
+    return [(a, b) for a, b in zip(best_path, best_path[1:])]
 
 
 def _get_fk_relations_helper(
@@ -732,7 +727,7 @@ def _get_fk_relations_helper(
                 visited_tables.append(table_to_visit)
                 return [fk_relation]
 
-    # If we reach this point, there are no single edge paths between visited and unvisited. Instead, we must construct a complete graph using all tables referenced in fk_relations_map.
+    # If we reach this point, there are no single edge paths between visited and unvisited. Instead, we must construct a graph using all tables referenced in fk_relations_map and find the shortest path between unvisited and visited tables.
     path = _shortest_path(unvisited_tables, visited_tables, fk_relations_map)
     col_names = []
 
@@ -776,6 +771,7 @@ def _get_fk_relations_linking_tables(
             relation.parent_column,
             relation.child_column,
         )
+
     # Greedily connect all tables using available foreign key relations.
     # Artbirary choose the first table_name to start.
     visited_tables = [table_names[0]]
@@ -869,7 +865,7 @@ def restore_from_clause(sql_spans, fk_relations):
     Returns:
         List of SqlSpan tuples with fully specified FROM clause(s).
     Raises:
-        UnsupportedSqlError: If cannot find path between mentioned tables 
+        UnsupportedSqlError: If cannot find path between mentioned tables
     """
     # Sort the list to avoid non-determinism.
     table_names = sorted(_get_all_table_names(sql_spans))

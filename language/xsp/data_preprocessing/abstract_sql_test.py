@@ -94,7 +94,7 @@ class AbstractSqlTest(absltest.TestCase):
             sql_uf_query, abstract_sql.sql_spans_to_string(sql_spans),
         )
         restored_spans = abstract_sql.restore_from_clause(sql_spans, fk_relations)
-        expected_sql = "select business.name , user.name from business join review on business.business_id = review.business_id join user on review.user_id = user.user_id where user.name = 'drake'"
+        expected_sql = "select business.name , user.name from business join user on review.user_id = user.user_id join review on review.business_id = business.business_id where user.name = 'drake'"
         self.assertEqual(expected_sql, abstract_sql.sql_spans_to_string(restored_spans))
 
     def test_nested_sql_with_unqualified_column(self):
@@ -310,6 +310,13 @@ class AbstractSqlTest(absltest.TestCase):
         path = abstract_sql._shortest_path(unvisited, visited, relations)
         expected = [("D", "B"), ("B", "C")]
         self.assertEqual(expected, path)
+
+    def test_bfs_no_path(self):
+        unvisited = ["D"]
+        visited = ["C"]
+        relations = {("D", "B"): ("fish", "fish")}
+        with self.assertRaises(abstract_sql.NoPathError):
+            abstract_sql._shortest_path(unvisited, visited, relations)
 
 
 if __name__ == "__main__":
