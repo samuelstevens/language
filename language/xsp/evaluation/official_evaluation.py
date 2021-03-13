@@ -32,6 +32,7 @@ import time
 
 import numpy as np
 import timeout_decorator
+from prelude import eprint
 from tqdm import tqdm
 
 # Maximum allowable timeout for executing predicted and gold queries.
@@ -101,7 +102,6 @@ def try_executing_query(prediction, cursor, case_sensitive=True, verbose=False):
 
     prediction_str = prediction[:]
     prediction_str = prediction_str.replace(";", "").strip()
-    print("Current prediction:" + prediction_str)
 
     st = time.time()
     try:
@@ -122,7 +122,9 @@ def try_executing_query(prediction, cursor, case_sensitive=True, verbose=False):
                 print(new_prediction)
         pred_results = timeout_execute(cursor, prediction)
     except timeout_decorator.timeout_decorator.TimeoutError:
-        print("!time out!")
+        eprint("Timed out!")
+        if verbose:
+            eprint(prediction)
         pred_results = []
         exception_str = "timeout"
     except (
@@ -210,23 +212,24 @@ def col_tab_f1(schema, gold_query, predicted_query):
 
 
 def execute_prediction(prediction, empty_table_cursor, cursor, case_sensitive, verbose):
-    """Executes a single example's prediction(s).
+    """
+    Executes a single example's prediction(s).
 
-  If more than one prediction is available, the most likely executable
-  prediction is used as the "official" prediction.
+    If more than one prediction is available, the most likely executable
+    prediction is used as the "official" prediction.
 
-  Args:
-    prediction: A dictionary containing information for a single example's
-      prediction.
-    empty_table_cursor: The cursor to a database containing no records, to be
-      used only to determine whether a query is executable in the database.
-    cursor: The sqlite3 database cursor to execute queries on.
-    case_sensitive: Boolean indicating whether the execution should be case
-      sensitive with respect to string values.
-    verbose: Whether to print details about what queries are being executed.
+    Args:
+        prediction: A dictionary containing information for a single example's
+    prediction.
+        empty_table_cursor: The cursor to a database containing no records, to be
+    used only to determine whether a query is executable in the database.
+        cursor: The sqlite3 database cursor to execute queries on.
+        case_sensitive: Boolean indicating whether the execution should be case
+    sensitive with respect to string values.
+        verbose: Whether to print details about what queries are being executed.
 
-  Returns:
-    Tuple containing the highest-ranked executable query, the resulting table,
+    Returns:
+        Tuple containing the highest-ranked executable query, the resulting table,
     and any exception string associated with executing this query.
   """
 
@@ -293,30 +296,31 @@ def execute_prediction(prediction, empty_table_cursor, cursor, case_sensitive, v
 def execute_predictions(
     predictions, cache_dict, ofile, case_sensitive, verbose, update_cache
 ):
-    """Executes predicted/gold queries and computes performance.
+    """
+    Executes predicted/gold queries and computes performance.
 
-  Writes results to ofile.
+    Writes results to ofile.
 
-  Args:
-    predictions: A list of dictionaries defining the predictions made by a
-      model.
-    cache_dict: A dictionary mapping from gold queries to the resulting tables.
-    ofile: A file pointer to be written to.
-    case_sensitive: A Boolean indicating whether execution of queries should be
-      case sensitive with respect to strings.
-    verbose: Whether to print detailed information about evaluation (e.g., for
-      debugging).
-    update_cache: Whether to execute and cache gold queries.
-  """
+    Args:
+        predictions: A list of dictionaries defining the predictions made by a model.
+        cache_dict: A dictionary mapping from gold queries to the resulting tables.
+        ofile: A file pointer to be written to.
+        case_sensitive: A Boolean indicating whether execution of queries should be
+        case sensitive with respect to strings.
+        verbose: Whether to print detailed information about evaluation (e.g., for debugging).
+        update_cache: Whether to execute and cache gold queries.
+    """
+    assert cache_dict is not None, "Must provide a cache dict, even if empty"
+
     # Keeps tracks of metrics throughout all of the evaluation.
-    exec_results_same = list()
-    string_same = list()
+    exec_results_same = []
+    string_same = []
 
-    precision = list()
-    recall = list()
+    precision = []
+    recall = []
 
-    column_f1s = list()
-    table_f1s = list()
+    column_f1s = []
+    table_f1s = []
 
     conversion_errors = 0
 
@@ -337,7 +341,7 @@ def execute_predictions(
         # Attempt to connect to the database for executing.
         try:
             conn = sqlite3.connect(prediction["database_path"])
-            conn.text_factory = str
+            conn.text_factory = lambda x: str(x, encoding="utf-8", errors="ignore")
         except sqlite3.OperationalError as e:
             print(prediction["database_path"])
             raise e
@@ -345,7 +349,9 @@ def execute_predictions(
         empty_path = "data/empty_databases/" + prediction["empty_database_path"]
         try:
             empty_conn = sqlite3.connect(empty_path)
-            empty_conn.text_factory = str
+            empty_conn.text_factory = lambda x: str(
+                x, encoding="utf-8", errors="ignore"
+            )
         except sqlite3.OperationalError as e:
             print(empty_path)
             raise e
@@ -417,7 +423,7 @@ def execute_predictions(
         ofile.write("\t" + gold_query.strip() + "\n")
 
         # Get the gold results
-        if cache_dict is None or gold_query not in cache_dict:
+        if gold_query not in cache_dict:
             if printable_utterance not in cache_dict:
                 if update_cache:
                     if verbose:
@@ -429,10 +435,16 @@ def execute_predictions(
                     ) = try_executing_query(gold_query, cursor, case_sensitive, verbose)
 
                     if gold_exception_str:
+                        if verbose:
+                            print(
+                                "Error executing gold query:\n\t"
+                                + gold_query
+                                + "\n\n\t"
+                                + gold_exception_str
+                            )
                         gold_error += 1
-                        gold_results = []
-                    elif cache_dict is not None:
-                        cache_dict[gold_query] = gold_results
+
+                    cache_dict[gold_query] = gold_results
                 else:
                     print(gold_query)
                     print(printable_utterance)
@@ -478,7 +490,7 @@ def execute_predictions(
             conversion_errors += 1
 
             # Only consider correct if the gold table was empty.
-            results_equivalent = gold_results == list()
+            results_equivalent = gold_results == []
 
         exec_results_same.append(int(results_equivalent))
         ofile.write("Execution was correct? " + str(results_equivalent) + "\n")
@@ -514,7 +526,11 @@ def execute_predictions(
     num_empty_pred = len(precision)
     num_empty_gold = len(recall)
 
-    precision = np.mean(np.array(precision))
+    if precision:
+        precision = np.mean(np.array(precision))
+    else:
+        precision = 0.0
+
     recall = np.mean(np.array(recall))
 
     execution_f1 = compute_f1(precision, recall)
@@ -546,39 +562,37 @@ def execute_predictions(
         + "\n"
     )
     ofile.write("Execution F1: " + "{0:.2f}".format(100.0 * execution_f1) + "\n")
-    ofile.write(
-        "Timeout: " + "{0:.2f}".format(timeouts * 100.0 / len(predictions)) + "\n"
-    )
-    ofile.write(
-        "Gold did not execute: "
-        + "{0:.2f}".format(gold_error * 100.0 / len(predictions))
-        + "\n"
-    )
+
+    if predictions:
+        timeouts = timeouts / len(predictions) * 100
+        gold_error = gold_error / len(predictions) * 100
+        schema_errors = schema_errors / len(predictions) * 100
+        syntax_errors = syntax_errors / len(predictions) * 100
+        conversion_errors = conversion_errors / len(predictions) * 100
+    else:
+        timeouts = 0
+        gold_error = 0
+        schema_errors = 0
+        syntax_errors = 0
+        conversion_errors = 0
+
+    ofile.write(f"Timeout: {timeouts:.2f}%\n")
+    ofile.write(f"Gold did not execute: {gold_error:.2f}%\n")
+
     ofile.write(
         "Average column F1: "
-        + "{0:.2f}".format(100.0 * np.mean(np.array(column_f1s)))
+        + "{0:.2f}%".format(100.0 * np.mean(np.array(column_f1s)))
         + "\n"
     )
     ofile.write(
         "Average table F1: "
-        + "{0:.2f}".format(100.0 * np.mean(np.array(table_f1s)))
+        + "{0:.2f}%".format(100.0 * np.mean(np.array(table_f1s)))
         + "\n"
     )
-    ofile.write(
-        "Schema errors: "
-        + "{0:.2f}".format((schema_errors) * 100.0 / len(predictions))
-        + "\n"
-    )
-    ofile.write(
-        "Syntax errors:  "
-        + "{0:.2f}".format((syntax_errors) * 100.0 / len(predictions))
-        + "\n"
-    )
-    ofile.write(
-        "Conversion errors: "
-        + "{0:.2f}".format((conversion_errors * 100.0) / len(predictions))
-        + "\n"
-    )
+
+    ofile.write(f"Schema errors: {schema_errors:.2f}%\n")
+    ofile.write(f"Syntax errors: {syntax_errors:.2f}%\n")
+    ofile.write(f"Conversion errors: {conversion_errors:.2f}%\n")
 
 
 def main(predictions_filepath, output_filepath, cache_filepath, verbose, update_cache):
@@ -591,18 +605,16 @@ def main(predictions_filepath, output_filepath, cache_filepath, verbose, update_
     # tables.
     cache_dict = None
 
-    # Only instantiate the cache dict if using Spider.
     print("cache path: " + cache_filepath)
 
     basefilename = os.path.basename(predictions_filepath).lower()
 
-    if "spider" not in basefilename:
-        cache_dict = dict()
-        if os.path.exists(cache_filepath):
-            print("Loading cache from %s" % cache_filepath)
-            with open(cache_filepath) as infile:
-                cache_dict = json.load(infile)
-            print("Loaded %d cached queries" % len(cache_dict))
+    cache_dict = {}
+    if os.path.exists(cache_filepath):
+        print("Loading cache from %s" % cache_filepath)
+        with open(cache_filepath) as infile:
+            cache_dict = json.load(infile)
+        print("Loaded %d cached queries" % len(cache_dict))
 
     # Create the text file that results will be written to.
     with open(output_filepath, "w") as ofile:
@@ -636,7 +648,7 @@ if __name__ == "__main__":
         "--output_filepath", type=str, help="Where to write the results."
     )
     parser.add_argument(
-        "--cache_filepath", type=str, help="A cache of the gold tables."
+        "--cache_filepath", type=str, help="A cache of the gold tables.", default=""
     )
     parser.add_argument(
         "--verbose", type=bool, help="If set to True, evaluation will be verbose."
