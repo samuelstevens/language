@@ -9,3 +9,5 @@ predictions/
 xsp_experiment_run/
 .replicate/
 spider_ssp/
+.keepsake/
+keepsake.yaml

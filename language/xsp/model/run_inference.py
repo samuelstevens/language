@@ -50,7 +50,9 @@ flags.DEFINE_string(
 
 flags.DEFINE_string("checkpoint_filepath", "", "The location of the checkpoint.")
 
-flags.DEFINE_string("input", "", "TFRecords file containing TFExamples to evaluate.")
+flags.DEFINE_string(
+    "input_tfrecords", "", "TFRecords file containing TFExamples to evaluate."
+)
 
 flags.DEFINE_string("data_filepath", "", "Directory containing the original data.")
 flags.DEFINE_string(
@@ -76,7 +78,7 @@ flags.DEFINE_bool(
     "Whether model was trained with under-specified from clauses.",
 )
 flags.DEFINE_bool(
-    "use_oracle_foriegn_keys",
+    "use_oracle_foreign_keys",
     True,
     "Whether to use oracle foreign keys when restoring from asql.",
 )
@@ -335,55 +337,58 @@ class RunInferenceDoFn(beam.DoFn):
 
 
 def inference_wrapper(inference_fn, sharded=False):
-    """Wrapper for running inference."""
-    dataset_name = FLAGS.dataset_name
+    """
+    Wrapper for running inference.
+    """
 
     if not FLAGS.predictions_path:
         raise ValueError("Predictions path must be set.")
 
     predictions = FLAGS.predictions_path
+
     # Don't run inference if predictions have already been generated.
-    if not tf.gfile.Glob(FLAGS.predictions_path + "*"):
+    if not tf.io.gfile.exists(predictions):
         inference_fn(
-            FLAGS.input, FLAGS.predictions_path, FLAGS.checkpoint_filepath, dataset_name
+            FLAGS.input_tfrecords, predictions, FLAGS.checkpoint_filepath,
         )
 
-    # If using Abstract SQL, need to restore under-specified FROM clauses
-    # output above.
+    # If using Abstract SQL, need to restore under-specified FROM clauses output above.
     if FLAGS.restore_preds_from_asql:
-        spider = dataset_name.lower() == "spider"
-
         if not FLAGS.restored_predictions_path:
             raise ValueError(
-                "Restored predictions path must be set "
-                "if restoring predictions from AbSQL."
+                "Restored predictions path must be set if restoring predictions from AbSQL."
+            )
+
+        is_spider = FLAGS.dataset_name.lower() == "spider"
+
+        michigan_schema = None
+        if not is_spider:
+            michigan_schema = read_schema(
+                os.path.join(FLAGS.data_filepath, FLAGS.dataset_name + "_schema.csv")
             )
 
         if not tf.io.gfile.exists(FLAGS.restored_predictions_path):
             restore_from_asql.restore_from_clauses(
                 predictions,
                 FLAGS.restored_predictions_path,
-                spider_examples_json=FLAGS.spider_examples_json if spider else "",
-                spider_tables_json=FLAGS.spider_tables_json if spider else "",
-                michigan_schema=None
-                if spider
-                else read_schema(
-                    os.path.join(
-                        FLAGS.data_filepath, FLAGS.dataset_name + "_schema.csv"
-                    )
-                ),
+                spider_examples_json=FLAGS.spider_examples_json if is_spider else "",
+                spider_tables_json=FLAGS.spider_tables_json if is_spider else "",
+                michigan_schema=michigan_schema,
                 dataset_name=FLAGS.dataset_name,
-                use_oracle_foriegn_keys=FLAGS.use_oracle_foriegn_keys,
+                use_oracle_foreign_keys=FLAGS.use_oracle_foreign_keys,
             )
+
+        # Update predictions with the fully qualified SQL predictions
         predictions = FLAGS.restored_predictions_path
+
     if FLAGS.match_and_save:
         # Load the database tables.
         schema_obj = None
-        if dataset_name.lower() == "spider":
+        if FLAGS.dataset_name.lower() == "spider":
             schema_obj = load_spider_tables(
                 os.path.join(FLAGS.data_filepath, "tables.json")
             )
-        elif dataset_name.lower() == "wikisql":
+        elif FLAGS.dataset_name.lower() == "wikisql":
             raise ValueError("WikiSQL inference is not supported yet")
         else:
             schema_csv = os.path.join(
@@ -395,7 +400,7 @@ def inference_wrapper(inference_fn, sharded=False):
         match_and_save(
             predictions,
             FLAGS.output,
-            dataset_name.lower(),
+            FLAGS.dataset_name.lower(),
             FLAGS.splits,
             FLAGS.data_filepath,
             schema_obj,
@@ -496,28 +501,31 @@ def match_and_save(
                 }
             )
 
-    print(output_path)
     with tf.gfile.Open(output_path, "w") as ofile:
         ofile.write(json.dumps(matched_examples))
 
 
-# dataset_name is unused because it's unnecessary in the local inference
-# function
-# pylint: disable=unused-argument
-def inference(input_path, predictions_path, checkpoint, dataset_name):
-    """Runs inference locally.
+# dataset_name is unused because it's unnecessary in the local inference function
+def inference(input_path, predictions_path, checkpoint):
+    """
+    Runs inference locally.
 
-  Args:
-    input_path: The TFRecord file with the input examples.
-    predictions_path: The filepath to save example predictions (as a .jsonl).
-    checkpoint: Filepath to the model save checkpoint.
-    dataset_name: Name of the dataset.
-  """
+    Args:
+        input_path: The TFRecord file with the input examples.
+        predictions_path: The filepath to save example predictions (as a .jsonl).
+        checkpoint: Filepath to the model save checkpoint.
+    """
+    assert predictions_path.endswith(
+        ".jsonl"
+    ), "predictions_path should be a .jsonl file"
+
+    assert input_path.endswith(".tfrecords"), "input_path should be a .tfrecords file"
+
     fn = RunInferenceDoFn(checkpoint)
 
     # Load and process the TFRecords. First, inference is ran on these records
     # without looking at the gold query.
-    examples = list()
+    examples = []
     record_iterator = tf.python_io.tf_record_iterator(path=input_path)
     for record in record_iterator:
         example = tf.train.SequenceExample()
