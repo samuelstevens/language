@@ -26,7 +26,7 @@ MYSQL_USER=${MYSQL_USER:-"root"}
 MYSQL_PASSWORD=${MYSQL_PASSWORD:-"password"}
 
 # 0. Copy data_utils scripts/prefix.txts to data/ directory
-if [[ -d data_utils ]]; then
+if [ ! -d data_utils ]; then
     echo "Copy the 'data_utils/' directory's contents to $(pwd)/data_utils"
     echo "You need the *-prefix.txt files and the *.py files"
     echo "This script can't copy them because I don't know where language/xsp/data_utils is relative to your data/ directory."
@@ -105,7 +105,7 @@ then
     download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/geography.json || exit
     mv geography.json geoquery/geoquery.json
 
-    download_github https://github.com/jkkummerfeld/text2sql-data/master/data/geography-schema.csv || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/geography-schema.csv || exit
     mv geography-schema.csv geoquery/geoquery_schema.csv
 fi
 
@@ -117,7 +117,7 @@ then
     download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/atis.json || exit
     mv atis.json atis/atis.json
 
-    download_github https://github.com/jkkummerfeld/text2sql-data/master/data/atis-schema.csv || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/atis-schema.csv || exit
     mv atis-schema.csv atis/atis_schema.csv
 fi
 
@@ -129,7 +129,7 @@ then
     download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/academic.json || exit
     mv academic.json academic/academic.json
 
-    download_github https://github.com/jkkummerfeld/text2sql-data/master/data/academic-schema.csv || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/academic-schema.csv || exit
     mv academic-schema.csv academic/academic_schema.csv
 fi
 
@@ -141,7 +141,7 @@ then
     download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/restaurants.json || exit
     mv restaurants.json restaurants/restaurants.json
 
-    download_github https://github.com/jkkummerfeld/text2sql-data/master/data/restaurants-schema.csv || exit
+    download_github https://raw.githubusercontent.com/jkkummerfeld/text2sql-data/master/data/restaurants-schema.csv || exit
     mv restaurants-schema.csv restaurants/restaurants_schema.csv
 
 fi
