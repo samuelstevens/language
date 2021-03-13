@@ -55,7 +55,6 @@ class TrainingOptions(
     collections.namedtuple(
         "TrainingOptions",
         [
-            "tpu_iterations_per_loop",
             "batch_size",
             "training_steps",
             "client_steps",

@@ -241,7 +241,6 @@ def get_features_and_labels(
     data_sources,
     batch_size,
     model_config,
-    federated=False,
     shuffle=False,
     num_epochs=None,
     scope="input_fn",
@@ -272,7 +271,6 @@ def get_features_and_labels(
         batch_size,
         static_padded_shapes,
         drop_remainder=False,
-        federated=federated,
         shuffle=shuffle,
         num_epochs=num_epochs,
         scope=scope,
@@ -327,7 +325,7 @@ def create_serving_input_fn(
     return input_fn
 
 
-def create_training_input_fn(model_config, directory, filepaths, federated=False):
+def create_training_input_fn(model_config, directory, filepaths):
     """Creates an input function that can be used with tf.learn estimators."""
 
     def input_fn():
@@ -335,7 +333,6 @@ def create_training_input_fn(model_config, directory, filepaths, federated=False
             [os.path.join(directory, filepath) for filepath in filepaths],
             model_config.training_options.batch_size,
             model_config,
-            federated=federated,
             shuffle=True,
             num_epochs=None,
             scope="train_input_fn",
@@ -344,15 +341,14 @@ def create_training_input_fn(model_config, directory, filepaths, federated=False
     return input_fn
 
 
-def create_eval_input_fn(model_config, directory, filepaths, use_tpu):
+def create_eval_input_fn(model_config, directory, filepaths, eval_batch_size):
     """Creates an input function that can be used with tf.learn estimators."""
 
-    def input_fn(params):
+    def input_fn():
         return get_features_and_labels(
             [os.path.join(directory, filepath) for filepath in filepaths],
-            params["eval_batch_size"],
+            eval_batch_size,
             model_config,
-            use_tpu,
             shuffle=True,
             num_epochs=1,
             scope="eval_input_fn",
