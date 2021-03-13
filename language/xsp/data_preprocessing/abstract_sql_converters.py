@@ -245,35 +245,31 @@ def _get_sql_spans_from_actions(actions):
             nested_sql_spans = _get_sql_spans_from_actions(
                 actions[action_idx:nested_statement_end_idx]
             )
-            sql_spans.append(
-                abstract_sql.make_sql_span(nested_statement=nested_sql_spans)
-            )
+            sql_spans.append(abstract_sql.SqlSpan(nested_statement=nested_sql_spans))
             # Set action index to end of nested statement.
             action_idx = nested_statement_end_idx + 1
             continue
 
         if action.symbol:
-            sql_spans.append(abstract_sql.make_sql_span(sql_token=action.symbol))
+            sql_spans.append(abstract_sql.SqlSpan(sql_token=action.symbol))
         elif action.entity_copy:
             copy_action = action.entity_copy
             if copy_action.copied_table:
                 sql_spans.append(
-                    abstract_sql.make_sql_span(
+                    abstract_sql.SqlSpan(
                         table_name=copy_action.copied_table.original_table_name
                     )
                 )
             else:
                 sql_spans.append(
-                    abstract_sql.make_sql_span(
+                    abstract_sql.SqlSpan(
                         table_name=copy_action.copied_column.table_name,
                         column_name=copy_action.copied_column.original_column_name,
                     )
                 )
         else:
             sql_spans.append(
-                abstract_sql.make_sql_span(
-                    value_literal=action.utterance_copy.wordpiece
-                )
+                abstract_sql.SqlSpan(value_literal=action.utterance_copy.wordpiece)
             )
         # Increment action index.
         action_idx += 1

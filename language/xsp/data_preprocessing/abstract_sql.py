@@ -794,7 +794,9 @@ def _get_fk_relations_linking_tables(
             )
     # Length of fk_relations will be 1 shorter than visited tables.
     # samuelstevens: added assert to match original authors' comment above
-    assert len(visited_tables) - 1 == len(fk_relations), f"Internal consistency error: {len(visited_tables)} is not 1 + {len(fk_relations)}"
+    assert len(visited_tables) - 1 == len(
+        fk_relations
+    ), f"Internal consistency error: {len(visited_tables)} is not 1 + {len(fk_relations)}"
     return visited_tables, fk_relations
 
 
