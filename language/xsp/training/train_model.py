@@ -211,20 +211,35 @@ def main(unused_argv):
             config, FLAGS.tf_examples_dir, [FLAGS.eval_filename], FLAGS.eval_batch_size
         )
 
-        validation_hook = ValidationHook(
-            model_fn=model_fn,
-            params={},
-            input_fn=eval_input_fn,
-            model_dir=FLAGS.model_dir,
-            every_n_steps=FLAGS.steps_between_saves,
-            experiment=experiment,
-        )
+        # validation_hook = ValidationHook(
+        #     model_fn=model_fn,
+        #     params={},
+        #     input_fn=eval_input_fn,
+        #     model_dir=FLAGS.model_dir,
+        #     every_n_steps=FLAGS.steps_between_saves,
+        #     experiment=experiment,
+        # )
 
-        estimator.train(
-            input_fn=train_input_fn,
-            max_steps=config.training_options.training_steps,
-            hooks=[validation_hook],
-        )
+        global_step = 0
+        while global_step < config.training_options.training_steps:
+
+            eval_results = estimator.evaluate(input_fn=eval_input_fn)
+            experiment.checkpoint(
+                metrics={
+                    "eval_loss": eval_results["loss"],
+                    "accuracy": eval_results["sequence_correct"],
+                },
+                step=global_step,
+                primary_metric=("eval_loss", "minimize"),
+            )
+            tf.logging.info("Eval results: %s", eval_results)
+
+            estimator.train(
+                input_fn=train_input_fn,
+                max_steps=global_step + FLAGS.steps_between_saves,
+            )
+            global_step += FLAGS.steps_between_saves
+
     # endregion
 
     # region eval
