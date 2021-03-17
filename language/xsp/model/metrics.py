@@ -42,7 +42,7 @@ def _sequence_correct(labels, predictions):
 
 def create_metrics_ops(labels, predictions):
     """Creates metrics ops for evaluation."""
-    metric_ops = dict()
+    metric_ops = {}
 
     sequence_correct = _sequence_correct(labels, predictions)
     metric_ops["sequence_correct"] = tf.metrics.mean(sequence_correct)

@@ -16,8 +16,9 @@
 
 from __future__ import absolute_import, division, print_function
 
-import os
 import re
+import statistics
+from typing import Any
 
 import keepsake
 import tensorflow.compat.v1 as tf
@@ -91,7 +92,7 @@ class ValidationHook(tf.train.SessionRunHook):
         self._timer = tf.train.SecondOrStepTimer(every_n_secs, every_n_steps)
         self._should_trigger = False
 
-    def begin(self):
+    def begin(self) -> None:
         self._timer.reset()
         self._iter_count = 0
 
@@ -116,7 +117,7 @@ class ValidationHook(tf.train.SessionRunHook):
         self._iter_count += 1
 
 
-def global_seed(seed):
+def global_seed(seed: int) -> float:
     tf.random.set_random_seed(seed)
 
 
@@ -155,7 +156,7 @@ def evaluate(estimator, eval_input_fn, checkpoint):
         tf.logging.info("Checkpoint %s no longer exists, skipping.", checkpoint)
 
 
-def main(unused_argv):
+def main(unused_argv: Any) -> None:
     tf.logging.info("Saving model saves and results to " + FLAGS.model_dir)
 
     global_seed(42)
@@ -175,21 +176,9 @@ def main(unused_argv):
         config, FLAGS.output_vocab, clean_output_vocab_path=""
     )
 
-    run_config = tf.estimator.RunConfig(
-        model_dir=FLAGS.model_dir,
-        tf_random_seed=42,
-        save_summary_steps=1,
-        save_checkpoints_steps=FLAGS.steps_between_saves,
-        keep_checkpoint_max=KEEP_CHECKPOINTS_MAX,
-    )
-
-    estimator = tf.estimator.Estimator(
-        model_fn=model_fn, params={}, model_dir=FLAGS.model_dir, config=run_config
-    )
-
     # region training
     if FLAGS.do_train:
-        # for keepsake CLI
+        # for keepsake CLI (helps track experiment results)
         experiment = keepsake.init(
             params={
                 "learning_rate": config.training_options.optimizer_learning_rate,
@@ -207,68 +196,137 @@ def main(unused_argv):
             [name for name in FLAGS.training_filename if name],
         )
 
+        train_features, train_labels = train_input_fn()
+        train_model = model_fn(
+            train_features, train_labels, tf.estimator.ModeKeys.TRAIN
+        )
+
+        tf.get_variable_scope().reuse_variables()
+
         eval_input_fn = input_pipeline.create_eval_input_fn(
             config, FLAGS.tf_examples_dir, [FLAGS.eval_filename], FLAGS.eval_batch_size
         )
+        eval_features, eval_labels = eval_input_fn()
+        eval_model = model_fn(eval_features, eval_labels, tf.estimator.ModeKeys.EVAL)
 
-        # validation_hook = ValidationHook(
-        #     model_fn=model_fn,
-        #     params={},
-        #     input_fn=eval_input_fn,
-        #     model_dir=FLAGS.model_dir,
-        #     every_n_steps=FLAGS.steps_between_saves,
-        #     experiment=experiment,
-        # )
+        # each checkpoint is ~1.3 GB, so 20 is ~25GB.
+        # TODO(samuelstevens): This can be turned down once I know a rough estimate for how many steps the model should train (based on validation loss).
+        saver = tf.train.Saver(max_to_keep=20)
 
         global_step = 0
-        while global_step < config.training_options.training_steps:
+        checkpoint = f"{FLAGS.model_dir}/ckpt-{global_step}"
 
-            eval_results = estimator.evaluate(input_fn=eval_input_fn)
+        with tf.Session() as init_sess:
+            init_sess.run(tf.global_variables_initializer())
+            saver.save(init_sess, checkpoint)
+
+        while global_step < config.training_options.training_steps:
+            # region training loop
+            with tf.Session() as train_sess:
+                tf.logging.info(
+                    "Training from step %s to step %s",
+                    global_step,
+                    global_step + FLAGS.steps_between_saves,
+                )
+                saver.restore(train_sess, checkpoint)
+
+                train_losses = []
+
+                for step in range(FLAGS.steps_between_saves):
+                    _, train_loss = train_sess.run(
+                        [train_model.train_op, train_model.loss]
+                    )
+
+                    train_losses.append(train_loss)
+
+                    if step % 100 == 0:
+                        tf.logging.info(
+                            "Step %s's training loss: %s",
+                            global_step + step,
+                            train_loss,
+                        )
+
+                train_loss = statistics.mean(train_losses)
+
+                global_step += FLAGS.steps_between_saves
+                checkpoint = f"{FLAGS.model_dir}/ckpt-{global_step}"
+                saver.save(train_sess, checkpoint)
+            # endregion
+
+            # region eval loop
+            with tf.Session() as eval_sess:
+                saver.restore(eval_sess, checkpoint)
+                eval_sess.run(tf.local_variables_initializer())
+
+                tf.logging.info("Evaluating checkpoint %s", checkpoint)
+
+                accuracies = []
+                eval_losses = []
+
+                eval_step = 0
+                eval_steps = (
+                    FLAGS.max_eval_steps if FLAGS.max_eval_steps else float("inf")
+                )
+                while eval_step < eval_steps:
+                    try:
+                        eval_loss, eval_result = eval_sess.run(
+                            [eval_model.loss, eval_model.eval_metric_ops]
+                        )
+                        eval_losses.append(eval_loss)
+                        # sequence correct contains a tuple of values representing value and update_state op (I think), so we only want the value.
+                        accuracies.append(eval_result["sequence_correct"][0])
+                    except tf.errors.OutOfRangeError:
+                        break
+
+                accuracy = statistics.mean(accuracies)
+                eval_loss = statistics.mean(eval_losses)
+
+                tf.logging.info(
+                    "Validation Results: \n\tLoss: %s\n\tAccuracy: %s",
+                    eval_loss,
+                    accuracy,
+                )
+            # endregion
+
             experiment.checkpoint(
-                metrics={
-                    "eval_loss": eval_results["loss"],
-                    "accuracy": eval_results["sequence_correct"],
-                },
                 step=global_step,
+                metrics={
+                    "train_loss": train_loss,
+                    "eval_loss": eval_loss,
+                    "eval_accuracy": accuracy,
+                },
                 primary_metric=("eval_loss", "minimize"),
             )
-            tf.logging.info("Eval results: %s", eval_results)
-
-            estimator.train(
-                input_fn=train_input_fn,
-                max_steps=global_step + FLAGS.steps_between_saves,
-            )
-            global_step += FLAGS.steps_between_saves
 
     # endregion
 
     # region eval
-    if FLAGS.do_eval:
-        max_acc = 0.0
+    # if FLAGS.do_eval:
+    #     max_acc = 0.0
 
-        eval_input_fn = input_pipeline.create_eval_input_fn(
-            config, FLAGS.tf_examples_dir, [FLAGS.eval_filename]
-        )
+    #     eval_input_fn = input_pipeline.create_eval_input_fn(
+    #         config, FLAGS.tf_examples_dir, [FLAGS.eval_filename]
+    #     )
 
-        num_train_steps = int(config.training_options.training_steps)
+    #     num_train_steps = int(config.training_options.training_steps)
 
-        for ckpt in tf.estimator.training.checkpoints_iterator(FLAGS.model_dir):
-            acc = evaluate(estimator, eval_input_fn, ckpt)
+    #     for ckpt in tf.estimator.training.checkpoints_iterator(FLAGS.model_dir):
+    #         acc = evaluate(estimator, eval_input_fn, ckpt)
 
-            if acc > max_acc:
-                copy_checkpoint(
-                    ckpt,
-                    os.path.join(
-                        FLAGS.model_dir,
-                        str(get_ckpt_number(ckpt))
-                        + "model_max_"
-                        + FLAGS.eval_filename.split(".")[0]
-                        + ".ckpt",
-                    ),
-                )
+    #         if acc > max_acc:
+    #             copy_checkpoint(
+    #                 ckpt,
+    #                 os.path.join(
+    #                     FLAGS.model_dir,
+    #                     str(get_ckpt_number(ckpt))
+    #                     + "model_max_"
+    #                     + FLAGS.eval_filename.split(".")[0]
+    #                     + ".ckpt",
+    #                 ),
+    #             )
 
-            if get_ckpt_number(ckpt) == num_train_steps:
-                break
+    #         if get_ckpt_number(ckpt) == num_train_steps:
+    #             break
     # endregion
 
 
