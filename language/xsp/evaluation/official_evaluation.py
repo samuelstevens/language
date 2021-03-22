@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Official evaluation script for natural language to SQL datasets.
+"""
+Official evaluation script for natural language to SQL datasets.
 
 Arguments:
   predictions_filepath (str): Path to a predictions file (in JSON format).
@@ -595,7 +596,13 @@ def execute_predictions(
     ofile.write(f"Conversion errors: {conversion_errors:.2f}%\n")
 
 
-def main(predictions_filepath, output_filepath, cache_filepath, verbose, update_cache):
+def main(
+    predictions_filepath: str,
+    output_filepath: str,
+    cache_filepath: str,
+    verbose: bool,
+    update_cache: bool,
+):
     with open(predictions_filepath) as infile:
         # Load the predictions filepath.
         predictions = json.load(infile)

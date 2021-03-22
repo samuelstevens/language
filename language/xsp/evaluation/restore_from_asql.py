@@ -134,7 +134,7 @@ def restore_from_clauses(
     spider_tables_json="",
     michigan_schema=None,
     dataset_name=None,
-    use_oracle_foreign_keys=False,
+    use_oracle_foreign_keys: bool = False,
 ):
     """
     Loads an original dataset and matches with a predictions file.
