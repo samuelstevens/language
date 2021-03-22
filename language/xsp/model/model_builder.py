@@ -28,10 +28,16 @@ from language.xsp.model import (
     metrics,
     transformer,
 )
+from language.xsp.model.model_config import ModelConfig
 
 
 def _compute_loss(
-    logits, decode_steps, target_len, weights, output_vocab_size, model_config
+    logits,
+    decode_steps: decode_utils.DecodeSteps,
+    target_len,
+    weights,
+    output_vocab_size: int,
+    model_config: ModelConfig,
 ):
     """Computes loss given batch of model outputs and labels."""
     logit_target_ids = decode_utils.get_extended_indices(

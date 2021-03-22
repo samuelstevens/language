@@ -17,6 +17,6 @@ python -m language.xsp.training.train_model \
   --eval_filename=spider_dev.tfrecords \
   --model_dir=${EXPERIMENT_DIR}/trial${TRIAL_NUM} \
   --eval_batch_size=8 \
-  --steps_between_saves=5000 \
+  --steps_between_saves=10000 \
   --do_train \
   --do_eval 

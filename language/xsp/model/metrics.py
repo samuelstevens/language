@@ -18,11 +18,14 @@ import tensorflow.compat.v1 as tf
 from language.xsp.model import decode_utils
 
 
-def _sequence_correct(labels, predictions):
+def _sequence_correct(
+    labels: decode_utils.LabelsDict, predictions: decode_utils.PredictionsDict
+):
     """Computes a per-example sequence accuracy."""
     target_decode_steps = decode_utils.decode_steps_from_labels(
         labels, trim_start_symbol=True
     )
+
     predicted_decode_steps = decode_utils.decode_steps_from_predictions(predictions)
 
     decode_utils.assert_shapes_match(target_decode_steps, predicted_decode_steps)

@@ -21,27 +21,36 @@ Therefore, we have two equivalent representations for decoder outputs:
 concatenation of the output vocabulary and the source, in that order.
 """
 
-import collections
+from typing import Any, Dict, List, NamedTuple
 
 import tensorflow.compat.v1 as tf
 
 from language.xsp.model import constants
+from language.xsp.model.model_config import ModelConfig
+
+# TODO(samuelstevens): convert these to typed dictionaries.
+LabelsDict = Dict[str, Any]
+PredictionsDict = Dict[str, Any]
+
 
 # Represents a decoder step.
 # Each tensor is expected to be shape [batch_size, output_length].
-# action_types: Integer tensor corresponding to
-#              internal_pb2.OutputStep enum values.
-# action_ids: Integer tensor with semantics dependent on action_type.
-DecodeSteps = collections.namedtuple("DecodeSteps", ["action_types", "action_ids"])
+class DecodeSteps(NamedTuple):
+    action_types: Any  # Integer tensor corresponding to internal_pb2.OutputStep enum values.
+    action_ids: Any  # Integer tensor with semantics dependent on action_type.
+
 
 # Represents the range in the extended action id space for each action type.
 # end_index is non-inclusive.
-ActionTypeRange = collections.namedtuple(
-    "ActionTypeRange", ["action_type", "start_index", "end_index"]
-)
+class ActionTypeRange(NamedTuple):
+    action_type: Any
+    start_index: int
+    end_index: int
 
 
-def _get_action_types_to_range(output_vocab_size, model_config):
+def _get_action_types_to_range(
+    output_vocab_size: int, model_config: ModelConfig
+) -> List[ActionTypeRange]:
     """Returns a list of ActionTypeRange tuples."""
     # Tuples of (action_type, length).
     action_type_tuples = [
@@ -61,7 +70,9 @@ def _get_action_types_to_range(output_vocab_size, model_config):
     return action_type_ranges
 
 
-def _get_action_type(extended_indices, output_vocab_size, model_config):
+def _get_action_type(
+    extended_indices, output_vocab_size: int, model_config: ModelConfig
+):
     """Returns action_type tensor."""
     action_type = tf.constant(0, dtype=tf.int64)
     for action_type_range in _get_action_types_to_range(
@@ -77,7 +88,9 @@ def _get_action_type(extended_indices, output_vocab_size, model_config):
     return action_type
 
 
-def _get_action_id(extended_indices, action_types, output_vocab_size, model_config):
+def _get_action_id(
+    extended_indices, action_types, output_vocab_size: int, model_config: ModelConfig
+):
     """Returns action_id tensor."""
     # This initial value will be broadcast to the length of decode_steps.
     action_ids = tf.constant(0, dtype=tf.int64)
@@ -95,7 +108,9 @@ def _get_action_id(extended_indices, action_types, output_vocab_size, model_conf
     return action_ids
 
 
-def get_decode_steps(extended_indices, output_vocab_size, model_config):
+def get_decode_steps(
+    extended_indices, output_vocab_size: int, model_config: ModelConfig
+) -> DecodeSteps:
     """Convert Tensor of indices in extended vocabulary to DecodeStep."""
     extended_indices = tf.to_int64(extended_indices)
     action_types = _get_action_type(extended_indices, output_vocab_size, model_config)
@@ -105,7 +120,9 @@ def get_decode_steps(extended_indices, output_vocab_size, model_config):
     return DecodeSteps(action_types=action_types, action_ids=action_ids)
 
 
-def get_extended_indices(decode_steps, output_vocab_size, model_config):
+def get_extended_indices(
+    decode_steps: DecodeSteps, output_vocab_size: int, model_config: ModelConfig
+):
     """Convert DecodeSteps into a tensor of extended action ids."""
     # This initial value will be broadcast to the length of decode_steps.
     extended_action_indices = tf.constant(0, dtype=tf.int64)
@@ -128,7 +145,7 @@ def concat_logits(generate_logits, copy_logits):
     return tf.concat([generate_logits, copy_logits], axis=2)
 
 
-def compare_decode_steps(decode_steps_a, decode_steps_b):
+def compare_decode_steps(decode_steps_a: DecodeSteps, decode_steps_b: DecodeSteps):
     """Returns tensor of bools indicated whether decode steps are equal."""
     return tf.reduce_all(
         tf.stack(
@@ -142,7 +159,9 @@ def compare_decode_steps(decode_steps_a, decode_steps_b):
     )
 
 
-def compare_generating_steps(target_decode_steps, predicted_decode_steps):
+def compare_generating_steps(
+    target_decode_steps: DecodeSteps, predicted_decode_steps: DecodeSteps
+):
     """Compare generating steps only but ignoring target copying steps.
 
   Args:
@@ -167,7 +186,9 @@ def compare_generating_steps(target_decode_steps, predicted_decode_steps):
     )
 
 
-def assert_shapes_match(decode_steps_a, decode_steps_b):
+def assert_shapes_match(
+    decode_steps_a: DecodeSteps, decode_steps_b: DecodeSteps
+) -> None:
     decode_steps_a.action_types.get_shape().assert_is_compatible_with(
         decode_steps_b.action_types.get_shape()
     )
@@ -176,7 +197,9 @@ def assert_shapes_match(decode_steps_a, decode_steps_b):
     )
 
 
-def decode_steps_from_labels(labels, trim_start_symbol=False, trim_end_symbol=False):
+def decode_steps_from_labels(
+    labels: LabelsDict, trim_start_symbol: bool = False, trim_end_symbol: bool = False
+) -> DecodeSteps:
     """Returns DecodeSteps given labels dict."""
     action_types = labels["target_action_types"]
     action_ids = labels["target_action_ids"]
@@ -189,7 +212,7 @@ def decode_steps_from_labels(labels, trim_start_symbol=False, trim_end_symbol=Fa
     return DecodeSteps(action_types=action_types, action_ids=action_ids)
 
 
-def decode_steps_from_predictions(predictions):
+def decode_steps_from_predictions(predictions: PredictionsDict) -> DecodeSteps:
     """Returns DecodeSteps given predictions dict."""
     return DecodeSteps(
         action_types=predictions[constants.PREDICTED_ACTION_TYPES],
@@ -197,17 +220,17 @@ def decode_steps_from_predictions(predictions):
     )
 
 
-def get_labels(decode_steps):
+def get_labels(decode_steps: DecodeSteps) -> LabelsDict:
     """Returns labels dict given DecodeSteps."""
-    return dict(
-        target_action_types=decode_steps.action_types,
-        target_action_ids=decode_steps.action_ids,
-    )
+    return {
+        "target_action_types": decode_steps.action_types,
+        "target_action_ids": decode_steps.action_ids,
+    }
 
 
-def get_predictions(decode_steps):
+def get_predictions(decode_steps: DecodeSteps) -> PredictionsDict:
     """Returns predictions dict given DecodeSteps."""
-    return dict(
-        predicted_action_types=decode_steps.action_types,
-        predicted_action_ids=decode_steps.action_ids,
-    )
+    return {
+        constants.PREDICTED_ACTION_TYPES: decode_steps.action_types,
+        constants.PREDICTED_ACTION_IDS: decode_steps.action_ids,
+    }
