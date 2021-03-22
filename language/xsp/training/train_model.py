@@ -57,13 +57,6 @@ flags.DEFINE_integer("steps_between_saves", 1000, "How many steps between saves.
 
 flags.DEFINE_integer("max_eval_steps", None, "Number of evaluation steps.")
 
-flags.DEFINE_bool("use_tpu", False, "Whether to use a TPU for training.")
-
-flags.DEFINE_string("primary", "", "The primary machine to use for TPU training.")
-
-flags.DEFINE_integer(
-    "num_tpu_shards", 1, "The number of shards to use during TPU training."
-)
 
 KEEP_CHECKPOINTS_MAX = 5
 
