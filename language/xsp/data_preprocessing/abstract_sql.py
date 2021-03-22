@@ -791,7 +791,7 @@ def _get_from_clause_for_tables(
             referenced_tables.add(table_a)
 
         else:
-            raise RuntimeError(
+            raise UnsupportedSqlError(
                 f"Neither table {table_a} and table {table_b} have been referenced"
             )
 
