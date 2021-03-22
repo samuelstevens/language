@@ -132,7 +132,7 @@ def clean_predicted_sequence(
         action_id_to_table_name_map = _action_id_to_table_name_map(
             segment_ids, copy_strings
         )
-    string_seq = list()
+    string_seq = []
     for action_type, action_id in zip(action_types, action_ids):
         if action_type == 1:
             # Generate symbol from output vocabulary.
@@ -257,8 +257,8 @@ def get_prediction(
     feed_dict = {placeholder: tf_example.SerializeToString()}
     output_vals = sess.run(outputs, feed_dict=feed_dict)
 
-    predictions = list()
-    scores = list()
+    predictions = []
+    scores = []
     for index in range(beam_size):
         prediction, score = clean_predicted_sequence(
             output_vals["predicted_action_ids"][index],
@@ -438,7 +438,7 @@ def match_and_save(
     # Load the data for this particular dataset (for look up)
     # `examples` is a list of dictionaries for each example, containing a TFRecord
     #  object, nl, sql, and a db_id (if running inference on Spider).
-    matched_examples = list()
+    matched_examples = []
     if dataset_name.lower() == "spider":
         assert len(splits) == 1
         split = splits[0]
