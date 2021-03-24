@@ -85,7 +85,7 @@ class ModelConfig(
         )
 
 
-def load_config(filename):
+def load_config(filename: str) -> ModelConfig:
     """Loads a serialized model config into a ModelConfig object."""
     with gfile.Open(filename) as infile:
         model_dict = json.load(infile)
