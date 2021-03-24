@@ -792,7 +792,7 @@ def _get_from_clause_for_tables(
 
         else:
             raise UnsupportedSqlError(
-                f"Neither table {table_a} and table {table_b} have been referenced"
+                f"Neither table {table_a} nor table {table_b} have been referenced"
             )
 
         # join table_b on table_a.column_a = table_b.column_b
