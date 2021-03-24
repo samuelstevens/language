@@ -683,6 +683,8 @@ def _steiner_tree(edges: Sequence[Tuple[T, T]], terminals: Set[T]) -> Set[Tuple[
 
     Since Steiner Tree is an NP-complete problem and our problem is small, I don't both with an efficient algorithm. The runtime is O(2^|E|).
     """
+    if len(edges) > 40:
+        raise TimeoutError("Can't finish such a large Steiner tree")
 
     adjacency: Dict[T, Set[T]] = {}
     for a, b in edges:
@@ -738,10 +740,15 @@ def _get_fk_relations_linking_tables(
         )
 
     # Connect all tables using steiner tree (minimum tree spanning some vertices) with table_names as vertices and fk_relations_map.keys() as edges.
-    relationship_tree = _steiner_tree(list(fk_relations_map.keys()), set(table_names))
-    sorted_table_names: List[Tuple[str, str]] = list(sorted(tuple(sorted(edge)) for edge in relationship_tree))  # type: ignore
-    sorted_column_names = [fk_relations_map[pair] for pair in sorted_table_names]
-    return sorted_table_names, sorted_column_names
+    try:
+        relationship_tree = _steiner_tree(
+            list(fk_relations_map.keys()), set(table_names)
+        )
+        sorted_table_names: List[Tuple[str, str]] = list(sorted(tuple(sorted(edge)) for edge in relationship_tree))  # type: ignore
+        sorted_column_names = [fk_relations_map[pair] for pair in sorted_table_names]
+        return sorted_table_names, sorted_column_names
+    except TimeoutError:
+        return table_names[:1], []
 
 
 def _get_from_clause_for_tables(

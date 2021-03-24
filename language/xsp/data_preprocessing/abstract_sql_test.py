@@ -18,6 +18,7 @@
 from __future__ import absolute_import, division, print_function
 
 from absl.testing import absltest
+import cProfile
 
 from language.xsp.data_preprocessing import abstract_sql
 
@@ -306,6 +307,37 @@ class AbstractSqlTest(absltest.TestCase):
         tree = abstract_sql._steiner_tree(edges, terminals)
         expected = {("A", "D"), ("C", "D"), ("C", "E")}
         self.assertEqual(expected, tree)
+
+    def test_steiner_tree_performance(self):
+        edges = [
+            ("A", "B"),
+            ("A", "C"),
+            ("A", "D"),
+            ("A", "E"),
+            ("B", "A"),
+            ("B", "C"),
+            ("B", "D"),
+            ("B", "E"),
+            ("B", "F"),
+            ("C", "A"),
+            ("C", "B"),
+            ("C", "D"),
+            ("C", "E"),
+            ("C", "F"),
+            ("D", "A"),
+            ("D", "B"),
+            ("D", "C"),
+            ("D", "E"),
+            ("D", "F"),
+            ("E", "A"),
+            ("E", "B"),
+            # ("E", "C"),
+            # ("E", "D"),
+            # ("E", "F"),
+        ]
+        terminals = set("AE")
+        assert 'edges' in locals()
+        cProfile.runctx("abstract_sql._steiner_tree(edges, terminals)", globals(), locals(), filename='steiner.prof')
 
 
 if __name__ == "__main__":
