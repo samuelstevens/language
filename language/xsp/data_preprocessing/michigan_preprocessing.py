@@ -18,8 +18,10 @@ from __future__ import absolute_import, division, print_function
 
 import csv
 import json
+from typing import Any, FrozenSet, List, Tuple, Union, overload
 
 import tensorflow.compat.v1.gfile as gfile
+from typing_extensions import Literal
 
 from language.xsp.data_preprocessing.nl_to_sql_example import (
     NLToSQLExample,
@@ -27,12 +29,33 @@ from language.xsp.data_preprocessing.nl_to_sql_example import (
 )
 
 
-def get_nl_sql_pairs(filepath, splits, with_dbs=False):
+@overload
+def get_nl_sql_pairs(
+    filepath: str, splits: FrozenSet[str], with_dbs: Literal[True]
+) -> List[Tuple[str, str, Any]]:
+    ...
+
+
+@overload
+def get_nl_sql_pairs(
+    filepath: str, splits: FrozenSet[str], with_dbs: Literal[False]
+) -> List[Tuple[str, str]]:
+    ...
+
+
+@overload
+def get_nl_sql_pairs(filepath: str, splits: FrozenSet[str]) -> List[Tuple[str, str]]:
+    ...
+
+
+def get_nl_sql_pairs(
+    filepath: str, splits: FrozenSet[str], with_dbs: bool = False
+) -> Union[List[Tuple[str, str]], List[Tuple[str, str, Any]]]:
     """Gets pairs of natural language and corresponding gold SQL for Michigan."""
     with gfile.Open(filepath) as infile:
         data = json.load(infile)
 
-    pairs = list()
+    pairs = []  # type: ignore
 
     tag = "[" + filepath.split("/")[-1].split(".")[0] + "]"
     print("Getting examples with tag " + tag)
@@ -52,8 +75,8 @@ def get_nl_sql_pairs(filepath, splits, with_dbs=False):
             if example["question-split"] not in splits:
                 continue
 
-            nl = example["text"]
-            sql = anonymized_sql
+            nl: str = example["text"]
+            sql: str = anonymized_sql
 
             # Go through the anonymized values and replace them in both the natural
             # language and the SQL.
@@ -83,11 +106,11 @@ def get_nl_sql_pairs(filepath, splits, with_dbs=False):
             sql = sql.replace('= "%"', 'LIKE "%"')
 
             if with_dbs:
-                pairs.append((nl, sql, example["table-id"]))
+                pairs.append((nl, sql, example["table-id"]))  # type: ignore
             else:
-                pairs.append((nl, sql))
+                pairs.append((nl, sql))  # type: ignore
 
-    return pairs
+    return pairs  # type: ignore
 
 
 def read_schema(schema_csv):

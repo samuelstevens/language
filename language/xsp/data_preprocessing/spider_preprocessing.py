@@ -14,6 +14,7 @@
 # limitations under the License.
 """Contains functions for loading and preprocessing the Spider data."""
 import json
+from typing import Any, Dict, List
 
 import sqlparse
 import tensorflow.compat.v1.gfile as gfile
@@ -65,16 +66,16 @@ def process_dbs(raw_dbs):
     return dbs
 
 
-def load_spider_tables(filenames):
+def load_spider_tables(filenames) -> Dict[Any, Any]:
     """Loads database schemas from the specified filenames."""
-    examples = dict()
+    examples = {}
     for filename in filenames.split(","):
         with gfile.GFile(filename) as training_file:
             examples.update(process_dbs(json.load(training_file)))
     return examples
 
 
-def load_spider_examples(filenames):
+def load_spider_examples(filenames) -> List[Any]:
     """Loads examples from the Spider dataset from the specified files."""
     examples = []
     for filename in filenames.split(","):
