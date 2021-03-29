@@ -18,10 +18,13 @@
 from __future__ import absolute_import, division, print_function
 
 import json
+from typing import List
 
 import tensorflow.compat.v1 as tf
+import tqdm
 
 from language.xsp.data_preprocessing import abstract_sql, abstract_sql_converters
+from language.xsp.model.inference import Prediction
 
 
 def _load_json(filepath):
@@ -110,15 +113,16 @@ def _get_restored_predictions(
             restored_prediction = abstract_sql_converters.restore_predicted_sql(
                 prediction, table_schemas, foreign_keys
             )
+            restored_predictions.append(restored_prediction)
+            restored_scores.append(score)
         except abstract_sql.UnsupportedSqlError as e:
             # Remove predictions that fail conversion.
             print("For query %s" % prediction)
             print("Unsupport Error: " + str(e))
         except abstract_sql.ParseError as e:
+            print("For query %s" % prediction)
             print("Parse Error: " + str(e))
-        else:
-            restored_predictions.append(restored_prediction)
-            restored_scores.append(score)
+
     restored_predictions_dict = {
         "utterance": utterance,
         "predictions": restored_predictions,
@@ -128,14 +132,13 @@ def _get_restored_predictions(
 
 
 def restore_from_clauses(
-    input_path,
-    output_path,
+    predictions: List[Prediction],
     spider_examples_json="",
     spider_tables_json="",
     michigan_schema=None,
     dataset_name=None,
     use_oracle_foreign_keys: bool = False,
-):
+) -> List[Prediction]:
     """
     Loads an original dataset and matches with a predictions file.
 
@@ -168,15 +171,12 @@ def restore_from_clauses(
             "or a Michigan schema object."
         )
 
-    # Load the predictions file.
-    predictions_dicts = _load_predictions_dicts(input_path)
-
     # Restore from clauses.
-    restored_predictions_dicts = []
-    for predictions_dict in predictions_dicts:
-        restored_predictions_dicts.append(
+    restored_predictions = []
+    for prediction in tqdm.tqdm(predictions):
+        restored_predictions.append(
             _get_restored_predictions(
-                predictions_dict,
+                prediction,
                 utterance_to_db_map,
                 michigan_schema,
                 dataset_name,
@@ -184,8 +184,4 @@ def restore_from_clauses(
             )
         )
 
-    # Write predictions.
-    with tf.gfile.Open(output_path, "w") as output_file:
-        for predictions_dict in restored_predictions_dicts:
-            output_file.write("%s\n" % json.dumps(predictions_dict))
-    print("Wrote %s prediction dicts to %s." % (len(predictions_dicts), output_path))
+    return restored_predictions
