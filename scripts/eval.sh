@@ -12,7 +12,7 @@ PREDICTIONS_DIR="${EXPERIMENT_DIR}/trial${TRIAL_NUM}_predictions"
 # run_inference yelp dev
 function evaluate {
     python -m language.xsp.evaluation.official_evaluation \
-      --predictions_filepath=${PREDICTIONS_DIR}/${1}_${2}_predictions.json \
+      --predictions_filepath=${PREDICTIONS_DIR}/${1}_${2}_instructions.json \
       --output_filepath=${PREDICTIONS_DIR}/${1}_${2}_predictions.txt \
       --cache_filepath=${PREDICTIONS_DIR}/${1}_${2}_cache.json \
       --update_cache=True
@@ -20,11 +20,11 @@ function evaluate {
 
 evaluate spider dev
 
-# evaluate atis dev
-# evaluate academic dev
-# # evaluate advising dev
-# evaluate geoquery dev
-# evaluate imdb dev
-# evaluate restaurants dev
-# evaluate scholar dev
-# evaluate yelp dev
+evaluate atis dev
+evaluate academic dev
+# evaluate advising dev
+evaluate geoquery dev
+evaluate imdb dev
+evaluate restaurants dev
+evaluate scholar dev
+evaluate yelp dev
