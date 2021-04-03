@@ -17,9 +17,10 @@
 from __future__ import absolute_import, division, print_function
 
 import os
+import pathlib
 import random
 import statistics
-from typing import Any, Dict
+from typing import Any, Dict, Union
 
 import keepsake
 import tensorflow.compat.v1 as tf
@@ -91,6 +92,14 @@ flags.DEFINE_string("spider_tables_json", "", "Path to Spider json tables.")
 
 
 KEEP_CHECKPOINTS_MAX = 5
+
+
+def delete_checkpoint(model_dir: Union[str, pathlib.Path], num: int) -> None:
+    if isinstance(model_dir, str):
+        model_dir = pathlib.Path(model_dir)
+
+    for checkpoint_file in (model_dir / f"ckpt-{num}").glob("*"):
+        os.remove(checkpoint_file)
 
 
 def global_seed(seed: int) -> None:
