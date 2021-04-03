@@ -17,10 +17,9 @@
 from __future__ import absolute_import, division, print_function
 
 import os
-import pathlib
 import random
-import re
-from typing import Any, Dict, Union
+import statistics
+from typing import Any, Dict
 
 import keepsake
 import tensorflow.compat.v1 as tf
@@ -34,6 +33,10 @@ import language.xsp.model.model_config as model_config
 from language.xsp.evaluation import restore_from_asql
 
 FLAGS = flags.FLAGS
+
+flags.DEFINE_bool("do_train", False, "Whether to do training.")
+
+flags.DEFINE_bool("do_eval", False, "Whether to do evaluation continuously.")
 
 flags.DEFINE_string("tf_examples_dir", "", "Path to the tensorflow examples folder.")
 
@@ -90,115 +93,6 @@ flags.DEFINE_string("spider_tables_json", "", "Path to Spider json tables.")
 KEEP_CHECKPOINTS_MAX = 5
 
 
-class ValidationHook(tf.train.SessionRunHook):
-    _config: inference.Config
-    _validation_query_cache: Dict[str, Any]
-
-    def __init__(
-        self, experiment, config: inference.Config, every_n_steps=None,
-    ):
-        self._iter_count = 0
-        self._config = config
-        self._should_trigger = False
-        self._experiment = experiment
-        self._validation_query_cache = {}
-        self._timer = tf.train.SecondOrStepTimer(None, every_n_steps)
-
-    def begin(self):
-        self._timer.reset()
-        self._iter_count = 0
-
-    def before_run(self, run_context):
-        self._should_trigger = self._timer.should_trigger_for_step(self._iter_count)
-
-    def after_run(self, run_context, run_values) -> None:
-        if not self._should_trigger:
-            self._iter_count += 1
-            return
-
-        examples = inference.load_tf_examples(
-            os.path.join(FLAGS.tf_examples_dir, FLAGS.eval_filename)
-        )
-        random.shuffle(examples)
-
-        checkpoint = self.get_latest_checkpoint(FLAGS.model_dir)
-
-        predictions = inference.inference(examples, checkpoint, self._config)
-
-        if FLAGS.using_abstract_sql:
-            is_spider = "spider" == FLAGS.eval_dataset_name.lower()
-
-            michigan_schema = None
-            if not is_spider:
-                michigan_schema = inference.load_schema_obj(
-                    FLAGS.eval_dataset_name, FLAGS.original_data_directory
-                )
-
-            predictions = restore_from_asql.restore_from_clauses(
-                predictions,
-                spider_examples_json=FLAGS.spider_examples_json if is_spider else "",
-                spider_tables_json=FLAGS.spider_tables_json if is_spider else "",
-                michigan_schema=michigan_schema,
-                dataset_name=FLAGS.eval_dataset_name,
-                use_oracle_foreign_keys=FLAGS.use_oracle_foreign_keys,
-            )
-
-        # Load the database tables.
-        schema_obj = inference.load_schema_obj(
-            FLAGS.eval_dataset_name, FLAGS.original_data_directory
-        )
-
-        # Now match with the original data and save
-        examples_to_execute = inference.match_and_save(
-            self._config, predictions, schema_obj
-        )
-
-        # Only update cache when it's empty
-        should_update_cache = len(self._validation_query_cache) == 0
-
-        results, validation_query_cache = official_evaluation.execute_predictions(
-            examples_to_execute,
-            self._validation_query_cache,
-            "scholar" not in FLAGS.eval_dataset_name.lower(),
-            False,
-            should_update_cache,
-        )
-
-        metrics = official_evaluation.aggregate_metrics(results)
-
-        self._experiment.checkpoint(
-            step=self._iter_count,
-            metrics={"eval_execution_f1": metrics.execution_f1},
-            primary_metric=("eval_execution_f1", "maximize"),
-        )
-
-        self._timer.update_last_triggered_step(self._iter_count)
-        self._iter_count += 1
-
-    def get_latest_checkpoint(self, model_dir: Union[str, pathlib.Path]) -> str:
-        if isinstance(model_dir, str):
-            model_dir = pathlib.Path(model_dir)
-
-        assert os.path.isfile(model_dir / "checkpoint")
-
-        pattern = re.compile('all_model_checkpoint_paths: "ckpt-(.*)"')
-        latest = 0
-        with open(model_dir / "checkpoint") as checkpoint_file:
-            for line in checkpoint_file:
-                if not line.startswith("all_model_checkpoint_paths"):
-                    continue
-
-                pattern_match = pattern.match(line)
-                if not pattern_match:
-                    continue
-                checkpoint_num = pattern_match.group(1)
-
-                if int(checkpoint_num) > latest:
-                    latest = int(checkpoint_num)
-
-        return str(model_dir / f"ckpt-{latest}")
-
-
 def global_seed(seed: int) -> None:
     tf.random.set_random_seed(seed)
 
@@ -208,75 +102,174 @@ def main(unused_argv: Any) -> None:
 
     global_seed(42)
 
+    if not FLAGS.do_train and not FLAGS.do_eval:
+        raise ValueError("At least one of `do_train`, `do_eval` must be True.")
+
     config = model_config.load_config(FLAGS.config)
 
-    tf.logging.info("Training with train filenames: " + str(FLAGS.training_filename))
+    if FLAGS.do_train:
+        tf.logging.info(
+            "Training with train filenames: " + str(FLAGS.training_filename)
+        )
 
     # Training allows noisy examples so do not use clean output vocab
     model_fn = model_builder.build_model_fn(
         config, FLAGS.output_vocab_filepath, clean_output_vocab_path=""
     )
 
-    # for keepsake CLI (helps track experiment results)
-    experiment = keepsake.init(
-        params={
-            "learning_rate": config.training_options.optimizer_learning_rate,
-            "batch_size": config.training_options.batch_size,
-            "training_steps": config.training_options.training_steps,
-            "eval_batch_size": FLAGS.eval_batch_size,
-            "training_data": FLAGS.training_filename,
-            "eval_data": FLAGS.eval_filename,
-        },
-    )
+    # region training
+    if FLAGS.do_train:
+        # for keepsake CLI (helps track experiment results)
+        experiment = keepsake.init(
+            params={
+                "learning_rate": config.training_options.optimizer_learning_rate,
+                "batch_size": config.training_options.batch_size,
+                "training_steps": config.training_options.training_steps,
+                "eval_batch_size": FLAGS.eval_batch_size,
+                "training_data": FLAGS.training_filename,
+                "eval_data": FLAGS.eval_filename,
+            },
+        )
 
-    train_input_fn = input_pipeline.create_training_input_fn(
-        config,
-        FLAGS.tf_examples_dir,
-        [name for name in FLAGS.training_filename if name],
-    )
+        train_input_fn = input_pipeline.create_training_input_fn(
+            config,
+            FLAGS.tf_examples_dir,
+            [name for name in FLAGS.training_filename if name],
+        )
 
-    inference_config = inference.Config(
-        FLAGS.eval_dataset_name,
-        FLAGS.eval_splits.split(","),
-        FLAGS.output_vocab_filepath,
-        FLAGS.clean_output_vocab_filepath,
-        FLAGS.eval_beam_size,
-        FLAGS.using_abstract_sql,
-        FLAGS.database_directory,
-        FLAGS.empty_database_directory,
-        FLAGS.original_data_directory,
-        model_config.load_config(FLAGS.config),
-    )
+        train_features, train_labels = train_input_fn()
+        train_model = model_fn(
+            train_features, train_labels, tf.estimator.ModeKeys.TRAIN
+        )
 
-    validation_hook = ValidationHook(
-        every_n_steps=FLAGS.steps_between_saves,
-        experiment=experiment,
-        config=inference_config,
-    )
+        tf.get_variable_scope().reuse_variables()
 
-    run_config = tf.estimator.RunConfig(
-        model_dir=FLAGS.model_dir,
-        tf_random_seed=42,
-        save_summary_steps=1,
-        save_checkpoints_steps=FLAGS.steps_between_saves,
-        keep_checkpoint_max=KEEP_CHECKPOINTS_MAX,
-    )
+        inference_config = inference.Config(
+            FLAGS.eval_dataset_name,
+            FLAGS.eval_splits.split(","),
+            FLAGS.output_vocab_filepath,
+            FLAGS.clean_output_vocab_filepath,
+            FLAGS.eval_beam_size,
+            FLAGS.using_abstract_sql,
+            FLAGS.database_directory,
+            FLAGS.empty_database_directory,
+            FLAGS.original_data_directory,
+            model_config.load_config(FLAGS.config),
+        )
 
-    estimator = tf.estimator.Estimator(
-        model_fn=model_fn, params={}, model_dir=FLAGS.model_dir, config=run_config
-    )
+        # each checkpoint is ~1.3 GB, so 20 is ~25GB.
+        # TODO(samuelstevens): This can be turned down once I know a rough estimate for how many steps the model should train (based on validation loss).
+        saver = tf.train.Saver(max_to_keep=20)
 
-    estimator.train(
-        input_fn=train_input_fn,
-        max_steps=config.training_options.training_steps,
-        hooks=[validation_hook],
-    )
+        global_step = 0
+        checkpoint = f"{FLAGS.model_dir}/ckpt-{global_step}"
 
-    # experiment.checkpoint(
-    #     step=global_step,
-    #     metrics={"train_loss": train_loss, "eval_execution_f1": metrics.execution_f1,},
-    #     primary_metric=("eval_execution_f1", "maximize"),
-    # )
+        validation_query_cache: Dict[str, Any] = {}
+
+        with tf.Session() as init_sess:
+            init_sess.run(tf.global_variables_initializer())
+            saver.save(init_sess, checkpoint)
+
+        while global_step < config.training_options.training_steps:
+            # region training loop
+            with tf.Session() as train_sess:
+                tf.logging.info(
+                    "Training from step %s to step %s",
+                    global_step,
+                    global_step + FLAGS.steps_between_saves,
+                )
+                saver.restore(train_sess, checkpoint)
+
+                train_losses = []
+
+                for step in range(FLAGS.steps_between_saves):
+                    _, train_loss = train_sess.run(
+                        [train_model.train_op, train_model.loss]
+                    )
+
+                    train_losses.append(train_loss)
+
+                    if step % 100 == 0:
+                        tf.logging.info(
+                            "Step %s's training loss: %s",
+                            global_step + step,
+                            train_loss,
+                        )
+
+                train_loss = statistics.mean(train_losses)
+
+                global_step += FLAGS.steps_between_saves
+                checkpoint = f"{FLAGS.model_dir}/ckpt-{global_step}"
+                saver.save(train_sess, checkpoint)
+            # endregion
+
+            # region eval loop
+            tf.logging.info("Evaluating checkpoint %s", checkpoint)
+
+            tf.logging.info("Running inference on %s", FLAGS.eval_filename)
+
+            examples = inference.load_tf_examples(
+                os.path.join(FLAGS.tf_examples_dir, FLAGS.eval_filename)
+            )
+            random.shuffle(examples)
+
+            predictions = inference.inference(examples, checkpoint, inference_config,)
+
+            if FLAGS.using_abstract_sql:
+                is_spider = "spider" == FLAGS.eval_dataset_name.lower()
+
+                michigan_schema = None
+                if not is_spider:
+                    michigan_schema = inference.load_schema_obj(
+                        FLAGS.eval_dataset_name, FLAGS.original_data_directory
+                    )
+
+                predictions = restore_from_asql.restore_from_clauses(
+                    predictions,
+                    spider_examples_json=FLAGS.spider_examples_json
+                    if is_spider
+                    else "",
+                    spider_tables_json=FLAGS.spider_tables_json if is_spider else "",
+                    michigan_schema=michigan_schema,
+                    dataset_name=FLAGS.eval_dataset_name,
+                    use_oracle_foreign_keys=FLAGS.use_oracle_foreign_keys,
+                )
+
+            # Load the database tables.
+            schema_obj = inference.load_schema_obj(
+                FLAGS.eval_dataset_name, FLAGS.original_data_directory
+            )
+
+            # Now match with the original data and save
+            examples_to_execute = inference.match_and_save(
+                inference_config, predictions, schema_obj
+            )
+
+            # Only update cache when it's empty
+            should_update_cache = len(validation_query_cache) == 0
+
+            results, validation_query_cache = official_evaluation.execute_predictions(
+                examples_to_execute,
+                validation_query_cache,
+                "scholar" not in FLAGS.eval_dataset_name.lower(),
+                False,
+                should_update_cache,
+            )
+
+            metrics = official_evaluation.aggregate_metrics(results)
+            tf.logging.info(
+                "Validation Results:\n\tExecution F1: %s", metrics.execution_f1
+            )
+            # endregion
+
+            experiment.checkpoint(
+                step=global_step,
+                metrics={
+                    "train_loss": train_loss,
+                    "eval_execution_f1": metrics.execution_f1,
+                },
+                primary_metric=("eval_execution_f1", "maximize"),
+            )
 
     # endregion
 
