@@ -31,7 +31,7 @@ import json
 import os
 import sqlite3
 import time
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple, TypeVar
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple, TypeVar
 
 import numpy as np
 import timeout_decorator
@@ -389,7 +389,7 @@ def execute_prediction(
     return best_prediction, pred_results, exception_str, execution_time
 
 
-def write_results(results: List[ExecutionResult], ofile) -> None:
+def write_results(results: Sequence[ExecutionResult], ofile) -> None:
     metrics = aggregate_metrics(results)
 
     for i, result in enumerate(results):
@@ -465,7 +465,7 @@ def write_results(results: List[ExecutionResult], ofile) -> None:
     ofile.flush()
 
 
-def aggregate_metrics(results: List[ExecutionResult]) -> Metrics:
+def aggregate_metrics(results: Sequence[ExecutionResult]) -> Metrics:
     assert len(results) > 0, "Must have at least one result!"
     exec_results_same = []
     string_same = []
@@ -725,16 +725,25 @@ def execute_predictions(
     return results, cache_dict
 
 
+def to_json(results: Sequence[ExecutionResult]) -> str:
+    metrics = aggregate_metrics(results)
+    return json.dumps(metrics._asdict())
+
+
 def main(
     predictions_filepath: str,
     output_filepath: str,
     cache_filepath: str,
     verbose: bool,
     update_cache: bool,
+    format: str,
 ):
     assert predictions_filepath.endswith(
         ".json"
     ), f"Expected .json file, got {predictions_filepath}"
+
+    assert format in {"txt", "json"}, f"{format} is not a valid format"
+
     with open(predictions_filepath) as infile:
         # Load the predictions filepath.
         predictions = json.load(infile)
@@ -759,9 +768,15 @@ def main(
         predictions, cache_dict, "scholar" not in basefilename, verbose, update_cache,
     )
 
-    # Create the text file that results will be written to.
-    with open(output_filepath, "w") as ofile:
-        write_results(results, ofile)
+    if format == "txt":
+        # Create the text file that results will be written to.
+        with open(output_filepath, "w") as ofile:
+            write_results(results, ofile)
+    elif format == "json":
+        # just print a json object
+        print(to_json(results))
+    else:
+        raise ValueError(f"{format} is not a valid format")
 
     if "spider" not in basefilename:
         try:
@@ -794,6 +809,7 @@ if __name__ == "__main__":
         type=bool,
         help="If set to True, will execute and cache gold queries.",
     )
+    parser.add_argument("--format", type=str, default="txt", help="either txt or json")
     args = parser.parse_args()
 
     main(
@@ -802,4 +818,5 @@ if __name__ == "__main__":
         args.cache_filepath,
         args.verbose,
         args.update_cache,
+        args.format,
     )

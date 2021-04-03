@@ -18,7 +18,6 @@
 from __future__ import absolute_import, division, print_function
 
 from absl.testing import absltest
-import cProfile
 
 from language.xsp.data_preprocessing import abstract_sql
 
@@ -79,23 +78,6 @@ class AbstractSqlTest(absltest.TestCase):
             "join user_profiles on follows.f1 = user_profiles.uid where"
             " user_profiles.name = 'tyler swift' )"
         )
-        self.assertEqual(expected_sql, abstract_sql.sql_spans_to_string(restored_spans))
-
-    def test_restore_from_clause_with_implicit_tables(self):
-        fk_relations = [
-            abstract_sql.ForeignKeyRelation("user", "review", "user_id", "user_id"),
-            abstract_sql.ForeignKeyRelation(
-                "business", "review", "business_id", "business_id"
-            ),
-        ]
-
-        sql_uf_query = "select business.name , user.name <from_clause_placeholder> where user.name = 'drake'"
-        sql_spans = abstract_sql.sql_to_sql_spans(sql_uf_query)
-        self.assertEqual(
-            sql_uf_query, abstract_sql.sql_spans_to_string(sql_spans),
-        )
-        restored_spans = abstract_sql.restore_from_clause(sql_spans, fk_relations)
-        expected_sql = "select business.name , user.name from business join review on business.business_id = review.business_id join user on review.user_id = user.user_id where user.name = 'drake'"
         self.assertEqual(expected_sql, abstract_sql.sql_spans_to_string(restored_spans))
 
     def test_nested_sql_with_unqualified_column(self):
@@ -261,10 +243,10 @@ class AbstractSqlTest(absltest.TestCase):
         expected_from_clause = (
             "author "
             "join domain_author on author.aid = domain_author.aid "
+            "join domain on domain_author.did = domain.did "
             "join organization on author.oid = organization.oid "
             "join writes on author.aid = writes.aid "
-            "join domain on domain.did = domain_author.did "
-            "join publication on publication.pid = writes.pid"
+            "join publication on writes.pid = publication.pid"
         )
         self.assertEqual(expected_from_clause, from_clause)
 
@@ -286,58 +268,6 @@ class AbstractSqlTest(absltest.TestCase):
         replaced = abstract_sql.sql_spans_to_string(replaced_spans, sep=" ")
         expected = "select foo.name <from_clause_placeholder> bar"
         self.assertEqual(expected, replaced)
-
-    def test_steiner_tree(self):
-        edges = [("A", "D"), ("D", "B"), ("B", "C")]
-        terminals = set("ADC")
-        tree = abstract_sql._steiner_tree(edges, terminals)
-        expected = set(edges)
-        self.assertEqual(expected, tree)
-
-    def test_steiner_tree_not_all_edges(self):
-        edges = [("A", "D"), ("D", "B"), ("B", "C")]
-        terminals = set("DC")
-        tree = abstract_sql._steiner_tree(edges, terminals)
-        expected = {("D", "B"), ("B", "C")}
-        self.assertEqual(expected, tree)
-
-    def test_steiner_tree_harder(self):
-        edges = [("A", "B"), ("A", "D"), ("B", "D"), ("C", "D"), ("C", "E")]
-        terminals = set("ADE")
-        tree = abstract_sql._steiner_tree(edges, terminals)
-        expected = {("A", "D"), ("C", "D"), ("C", "E")}
-        self.assertEqual(expected, tree)
-
-    def test_steiner_tree_performance(self):
-        edges = [
-            ("A", "B"),
-            ("A", "C"),
-            ("A", "D"),
-            ("A", "E"),
-            ("B", "A"),
-            ("B", "C"),
-            ("B", "D"),
-            ("B", "E"),
-            ("B", "F"),
-            ("C", "A"),
-            ("C", "B"),
-            ("C", "D"),
-            ("C", "E"),
-            ("C", "F"),
-            ("D", "A"),
-            ("D", "B"),
-            ("D", "C"),
-            ("D", "E"),
-            ("D", "F"),
-            ("E", "A"),
-            ("E", "B"),
-            # ("E", "C"),
-            # ("E", "D"),
-            # ("E", "F"),
-        ]
-        terminals = set("AE")
-        assert 'edges' in locals()
-        cProfile.runctx("abstract_sql._steiner_tree(edges, terminals)", globals(), locals(), filename='steiner.prof')
 
 
 if __name__ == "__main__":

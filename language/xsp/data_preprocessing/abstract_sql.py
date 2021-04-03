@@ -24,19 +24,7 @@ TODO(petershaw): A proper parser and grammar for SQL would improve robustness!
 from __future__ import absolute_import, division, print_function
 
 import collections
-import copy
-from typing import (
-    Any,
-    Dict,
-    List,
-    Mapping,
-    NamedTuple,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    TypeVar,
-)
+from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple
 
 import sqlparse
 
@@ -99,6 +87,20 @@ class SqlSpan:
         self.column = column
         self.table_name = table_name
         self.nested_statement = nested_statement
+
+    def __repr__(self) -> str:
+        field = None
+        if self.sql_token:
+            field = "sql_token"
+        elif self.value_literal:
+            field = "value_literal"
+        elif self.column:
+            field = "column"
+        elif self.table_name:
+            field = "table_name"
+        else:
+            field = "nested_statement"
+        return f"SQL({field}: '{getattr(self, field)}')"
 
     def __str__(self) -> str:
         return repr(self)
@@ -626,99 +628,33 @@ def replace_from_clause(sql_spans: Sequence[SqlSpan]) -> List[SqlSpan]:
     return replaced_spans
 
 
-T = TypeVar("T")
-
-
-def _construct_path(start: T, end: T, parents: Mapping[T, T]) -> List[T]:
-    path = [end]
-    current = end
-    while current in parents:
-        path.append(parents[current])
-        current = parents[current]
-
-    return list(reversed(path))
-
-
-def _connected_tree(tree: List[Tuple[T, T]], adjacency: Mapping[T, Set[T]]) -> bool:
-    # to check that the tree is connected, perform breadth-first search and ensure that all nodes are marked as 'seen'
-    if len(tree) <= 1:
-        return True
-
-    seen = set()
-    stack = [tree[0][0]]  # first element of the first edge (arbitrary)
-
-    while stack:
-        node = stack.pop()
-        for neighbor in adjacency[node]:
-            if (
-                (node, neighbor) not in tree
-                and (neighbor, node) not in tree
-                or neighbor in seen
-            ):
-                continue
-
-            seen.add(neighbor)
-            stack.append(neighbor)
-
-    referenced_nodes = {first for first, _ in tree} | {second for _, second in tree}
-    return len(seen) == len(referenced_nodes)
-
-
-def _contains_all_terminals(tree: Sequence[Tuple[T, T]], terminals: Set[T]) -> bool:
-    seen_terminals = copy.copy(terminals)
-    for a, b in tree:
-        if a in seen_terminals:
-            seen_terminals.remove(a)
-        if b in seen_terminals:
-            seen_terminals.remove(b)
-
-    return not seen_terminals
-
-
-def _steiner_tree(edges: Sequence[Tuple[T, T]], terminals: Set[T]) -> Set[Tuple[T, T]]:
+def _get_fk_relations_helper(
+    unvisited_tables: List[str],
+    visited_tables: List[str],
+    fk_relations_map: Mapping[Tuple[str, str], Tuple[str, str]],
+) -> Optional[Tuple[str, str, str, str]]:
     """
-    Given a graph, find a minimum size tree containing every terminal.
+    Returns a pair of table name, col name connecting to an unvisited table, or None.
 
-    H = (V', E') is a subset of G such that T is a subset of V' (G.V not needed)
-
-    Since Steiner Tree is an NP-complete problem and our problem is small, I don't both with an efficient algorithm. The runtime is O(2^|E|).
+    Modifies unvisted_tables and visited_tables.
     """
-    if len(edges) > 40:
-        raise TimeoutError("Can't finish such a large Steiner tree")
 
-    adjacency: Dict[T, Set[T]] = {}
-    for a, b in edges:
-        if a not in adjacency:
-            adjacency[a] = set()
-        adjacency[a].add(b)
+    for table_to_visit in unvisited_tables:
+        for table in visited_tables:
+            if (table, table_to_visit) in fk_relations_map:
+                fk_relation = fk_relations_map[(table, table_to_visit)]
+                unvisited_tables.remove(table_to_visit)
+                visited_tables.append(table_to_visit)
+                return table, fk_relation[0], table_to_visit, fk_relation[1]
 
-        if b not in adjacency:
-            adjacency[b] = set()
-        adjacency[b].add(a)
-
-    best_tree = set(edges)
-
-    for code in range(2 ** len(edges)):
-        tree = []
-        for i, on_off in enumerate(reversed(bin(code)[2:])):
-            if on_off == "1":
-                tree.append(edges[i])
-
-        if (
-            len(tree) < len(best_tree)
-            and _contains_all_terminals(tree, terminals)
-            and _connected_tree(tree, adjacency)
-        ):
-            best_tree = set(tree)
-
-    return best_tree
+    return None
 
 
 def _get_fk_relations_linking_tables(
     table_names: Sequence[str], known_fk_relations: Sequence[ForeignKeyRelation]
-) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
+) -> List[Tuple[str, str, str, str]]:
     """
-    Returns (List of visited table names, List of (col name, col name)).
+    Returns a list of table_a, col_a, table_b, col_b
     """
 
     if not table_names:
@@ -726,6 +662,7 @@ def _get_fk_relations_linking_tables(
 
     # Build map of (child table, parent table) to (child column, parent column).
     fk_relations_map: Dict[Tuple[str, str], Tuple[str, str]] = {}
+
     for relation in known_fk_relations:
         # TODO(petershaw): Consider adding warning if overwriting key.
         # This can lead to ambiguous conversions back to fully-specified SQL.
@@ -739,16 +676,29 @@ def _get_fk_relations_linking_tables(
             relation.child_column,
         )
 
-    # Connect all tables using steiner tree (minimum tree spanning some vertices) with table_names as vertices and fk_relations_map.keys() as edges.
-    try:
-        relationship_tree = _steiner_tree(
-            list(fk_relations_map.keys()), set(table_names)
+    # Greedily connect all tables using available foreign key realtions.
+    # Arbitrarily choose the first table_name to start.
+    visited_tables = [table_names[0]]
+    unvisited_tables = list(table_names[1:])
+    fk_relations = []
+    while unvisited_tables:
+        fk_relation = _get_fk_relations_helper(
+            unvisited_tables, visited_tables, fk_relations_map
         )
-        sorted_table_names: List[Tuple[str, str]] = list(sorted(tuple(sorted(edge)) for edge in relationship_tree))  # type: ignore
-        sorted_column_names = [fk_relations_map[pair] for pair in sorted_table_names]
-        return sorted_table_names, sorted_column_names
-    except TimeoutError:
-        return table_names[:1], []
+        if fk_relation:
+            fk_relations.append(fk_relation)
+        else:
+            raise UnsupportedSqlError(
+                "Couldn't find path between tables %s given relations %s"
+                % (table_names, known_fk_relations)
+            )
+
+    # Length of fk_relations will be 1 shorter than visited tables.
+    # samuelstevens: added assert to match original authors' comment above
+    assert len(visited_tables) - 1 == len(
+        fk_relations
+    ), f"Internal consistency error: {len(visited_tables)} is not 1 + {len(fk_relations)}"
+    return fk_relations
 
 
 def _get_from_clause_for_tables(
@@ -761,48 +711,23 @@ def _get_from_clause_for_tables(
     if len(table_names) == 1:
         return [SqlSpan(table_name=table_names[0])]
 
-    fk_tables, fk_cols = _get_fk_relations_linking_tables(
-        table_names, known_fk_relations
-    )
+    foreign_pairs = _get_fk_relations_linking_tables(table_names, known_fk_relations)
+
     sql_spans = []
-    sql_spans.append(SqlSpan(table_name=fk_tables[0][0]))
-    referenced_tables: Set[str] = {fk_tables[0][0]}
+    sql_spans.append(SqlSpan(table_name=foreign_pairs[0][0]))
 
-    for (table_a, table_b), (col_a, col_b) in zip(fk_tables, fk_cols):
-        # TODO(samuelstevens): refactor this code to remove duplication
-        if table_a in referenced_tables:
-            # join table_b on table_a.col_a = table_b.col_b
-            sql_spans.append(SqlSpan(sql_token="join"))
-            sql_spans.append(SqlSpan(table_name=table_b))
-            sql_spans.append(SqlSpan(sql_token="on"))
-            sql_spans.append(
-                SqlSpan(column=SqlColumn(column_name=col_a, table_name=table_a))
-            )
-            sql_spans.append(SqlSpan(sql_token="="))
-            sql_spans.append(
-                SqlSpan(column=SqlColumn(column_name=col_b, table_name=table_b))
-            )
-            referenced_tables.add(table_b)
-        elif table_b in referenced_tables:
-            # join table_a on table_a.col_a = table_b.col_b
-            sql_spans.append(SqlSpan(sql_token="join"))
-            sql_spans.append(SqlSpan(table_name=table_a))
-            sql_spans.append(SqlSpan(sql_token="on"))
-            sql_spans.append(
-                SqlSpan(column=SqlColumn(column_name=col_a, table_name=table_a))
-            )
-            sql_spans.append(SqlSpan(sql_token="="))
-            sql_spans.append(
-                SqlSpan(column=SqlColumn(column_name=col_b, table_name=table_b))
-            )
-            referenced_tables.add(table_a)
-
-        else:
-            raise UnsupportedSqlError(
-                f"Neither table {table_a} nor table {table_b} have been referenced"
-            )
-
+    for table_a, col_a, table_b, col_b in foreign_pairs:
         # join table_b on table_a.column_a = table_b.column_b
+        sql_spans.append(SqlSpan(sql_token="join"))
+        sql_spans.append(SqlSpan(table_name=table_b))
+        sql_spans.append(SqlSpan(sql_token="on"))
+        sql_spans.append(
+            SqlSpan(column=SqlColumn(column_name=col_a, table_name=table_a))
+        )
+        sql_spans.append(SqlSpan(sql_token="="))
+        sql_spans.append(
+            SqlSpan(column=SqlColumn(column_name=col_b, table_name=table_b))
+        )
     return sql_spans
 
 

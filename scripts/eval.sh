@@ -15,16 +15,20 @@ function evaluate {
       --predictions_filepath=${PREDICTIONS_DIR}/${1}_${2}_instructions.json \
       --output_filepath=${PREDICTIONS_DIR}/${1}_${2}_predictions.txt \
       --cache_filepath=${PREDICTIONS_DIR}/${1}_${2}_cache.json \
-      --update_cache=True
+      --update_cache=True \
+      --format=json | tail -n 1 | \
+      jq ". += { \"name\": \"${1}\" }" 
 }
 
-evaluate spider dev
+output_json_filepath=${PREDICTIONS_DIR}/predictions_summary.jsonl
 
-evaluate atis dev
-evaluate academic dev
+evaluate spider dev > ${output_json_filepath}
+
+evaluate atis dev >> ${output_json_filepath}
+evaluate academic dev >> ${output_json_filepath}
 # evaluate advising dev
-evaluate geoquery dev
-evaluate imdb dev
-evaluate restaurants dev
-evaluate scholar dev
-evaluate yelp dev
+evaluate geoquery dev >> ${output_json_filepath}
+evaluate imdb dev >> ${output_json_filepath}
+evaluate restaurants dev >> ${output_json_filepath}
+evaluate scholar dev >> ${output_json_filepath}
+evaluate yelp dev >> ${output_json_filepath}
