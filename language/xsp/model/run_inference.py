@@ -160,7 +160,7 @@ def inference_wrapper(sharded: bool = False):
 
     # Now match with the original data and save
     cached_fn_call(
-        lambda: inference.match_and_save(config, predictions, schema_obj),
+        lambda: inference.match_with_dataset(config, predictions, schema_obj),
         FLAGS.output_filepath,
     )
 

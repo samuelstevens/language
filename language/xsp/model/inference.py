@@ -376,7 +376,7 @@ def load_schema_obj(dataset_name: str, data_dir: str) -> Dict[Any, Any]:
         return read_schema(schema_csv)
 
 
-def match_and_save(
+def match_with_dataset(
     config: Config, predictions: Sequence[Prediction], schema_obj: Dict[Any, Any]
 ) -> List[ExecutionInstructions]:
     """
@@ -468,6 +468,3 @@ def match_and_save(
     ), f"Only matched {len(matched_examples)} of {len(predictions)} examples."
 
     return matched_examples
-
-    # with tf.gfile.Open(output_path, "w") as ofile:
-    #     ofile.write(json.dumps(matched_examples))

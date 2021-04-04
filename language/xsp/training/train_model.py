@@ -16,11 +16,12 @@
 
 from __future__ import absolute_import, division, print_function
 
+import operator
 import os
 import pathlib
 import random
 import statistics
-from typing import Any, Dict, Union
+from typing import Any, Dict, List, Sequence, Union
 
 import keepsake
 import tensorflow.compat.v1 as tf
@@ -94,12 +95,73 @@ flags.DEFINE_string("spider_tables_json", "", "Path to Spider json tables.")
 KEEP_CHECKPOINTS_MAX = 5
 
 
+def should_save_latest_checkpoint(experiment: keepsake.experiment.Experiment) -> bool:
+    best = experiment.best()
+    latest = experiment.latest()
+
+    comparison = (
+        operator.ge if best.primary_metric["goal"] == "maximize" else operator.le
+    )
+
+    primary_metric = best.primary_metric["name"]
+
+    return comparison(latest.metrics[primary_metric], best.metrics[primary_metric])
+
+
+def checkpoint_path(step: int) -> str:
+    return f"{FLAGS.model_dir}/ckpt-{step}"
+
+
 def delete_checkpoint(model_dir: Union[str, pathlib.Path], num: int) -> None:
     if isinstance(model_dir, str):
         model_dir = pathlib.Path(model_dir)
 
     for checkpoint_file in (model_dir / f"ckpt-{num}").glob("*"):
         os.remove(checkpoint_file)
+
+
+def restore_asql_wrapper(
+    predictions: Sequence[inference.Prediction],
+) -> List[inference.Prediction]:
+    """
+    Is a wrapper for restoring abstracl sql clauses. Uses FLAGS to set up the arguments appropriately.
+    """
+    is_spider = "spider" == FLAGS.eval_dataset_name.lower()
+
+    # only need a michigan schema if it's not spider.
+    michigan_schema = None
+    if not is_spider:
+        michigan_schema = inference.load_schema_obj(
+            FLAGS.eval_dataset_name, FLAGS.original_data_directory
+        )
+
+    # restore under-specified from-clauses
+    return restore_from_asql.restore_from_clauses(
+        predictions,
+        spider_examples_json=FLAGS.spider_examples_json if is_spider else "",
+        spider_tables_json=FLAGS.spider_tables_json if is_spider else "",
+        michigan_schema=michigan_schema,
+        dataset_name=FLAGS.eval_dataset_name.lower(),
+        use_oracle_foreign_keys=FLAGS.use_oracle_foreign_keys,
+    )
+
+
+def get_examples_to_execute(
+    predictions: Sequence[inference.Prediction], inference_config: inference.Config
+) -> List[official_evaluation.ExecutionInstructions]:
+    """
+    Converts predictions from a model into sqlite execution instructions. If abstract SQL was used, converts back to fully-specfied SQL.
+    """
+    if FLAGS.using_abstract_sql:
+        predictions = restore_asql_wrapper(predictions)
+
+    # Load the database tables.
+    schema_obj = inference.load_schema_obj(
+        FLAGS.eval_dataset_name, FLAGS.original_data_directory
+    )
+
+    # Now match with the original data and save
+    return inference.match_with_dataset(inference_config, predictions, schema_obj)
 
 
 def global_seed(seed: int) -> None:
@@ -171,7 +233,7 @@ def main(unused_argv: Any) -> None:
         saver = tf.train.Saver(max_to_keep=20)
 
         global_step = 0
-        checkpoint = f"{FLAGS.model_dir}/ckpt-{global_step}"
+        checkpoint = checkpoint_path(global_step)
 
         validation_query_cache: Dict[str, Any] = {}
 
@@ -208,61 +270,35 @@ def main(unused_argv: Any) -> None:
                 train_loss = statistics.mean(train_losses)
 
                 global_step += FLAGS.steps_between_saves
-                checkpoint = f"{FLAGS.model_dir}/ckpt-{global_step}"
+                checkpoint = checkpoint_path(global_step)
                 saver.save(train_sess, checkpoint)
             # endregion
 
             # region eval loop
             tf.logging.info("Evaluating checkpoint %s", checkpoint)
 
-            tf.logging.info("Running inference on %s", FLAGS.eval_filename)
-
             examples = inference.load_tf_examples(
                 os.path.join(FLAGS.tf_examples_dir, FLAGS.eval_filename)
             )
             random.shuffle(examples)
 
+            tf.logging.info("Running inference on %s", FLAGS.eval_filename)
             predictions = inference.inference(examples, checkpoint, inference_config,)
 
-            if FLAGS.using_abstract_sql:
-                is_spider = "spider" == FLAGS.eval_dataset_name.lower()
-
-                michigan_schema = None
-                if not is_spider:
-                    michigan_schema = inference.load_schema_obj(
-                        FLAGS.eval_dataset_name, FLAGS.original_data_directory
-                    )
-
-                predictions = restore_from_asql.restore_from_clauses(
-                    predictions,
-                    spider_examples_json=FLAGS.spider_examples_json
-                    if is_spider
-                    else "",
-                    spider_tables_json=FLAGS.spider_tables_json if is_spider else "",
-                    michigan_schema=michigan_schema,
-                    dataset_name=FLAGS.eval_dataset_name,
-                    use_oracle_foreign_keys=FLAGS.use_oracle_foreign_keys,
-                )
-
-            # Load the database tables.
-            schema_obj = inference.load_schema_obj(
-                FLAGS.eval_dataset_name, FLAGS.original_data_directory
-            )
-
-            # Now match with the original data and save
-            examples_to_execute = inference.match_and_save(
-                inference_config, predictions, schema_obj
-            )
+            examples_to_execute = get_examples_to_execute(predictions, inference_config)
 
             # Only update cache when it's empty
             should_update_cache = len(validation_query_cache) == 0
 
+            # only scholar is case sensitive
+            case_sensitive = "scholar" not in FLAGS.eval_dataset_name.lower()
+
             results, validation_query_cache = official_evaluation.execute_predictions(
-                examples_to_execute,
-                validation_query_cache,
-                "scholar" not in FLAGS.eval_dataset_name.lower(),
-                False,
-                should_update_cache,
+                instructions=examples_to_execute,
+                cache_dict=validation_query_cache,
+                case_sensitive=case_sensitive,
+                verbose=False,
+                update_cache=should_update_cache,
             )
 
             metrics = official_evaluation.aggregate_metrics(results)
@@ -279,6 +315,14 @@ def main(unused_argv: Any) -> None:
                 },
                 primary_metric=("eval_execution_f1", "maximize"),
             )
+
+            # region disk management
+
+            if not should_save_latest_checkpoint(experiment):
+                # it was already saved to disk, so now delete it.
+                delete_checkpoint(FLAGS.model_dir, global_step)
+
+            # endregion
 
     # endregion
 

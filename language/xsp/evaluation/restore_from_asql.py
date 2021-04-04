@@ -18,7 +18,7 @@
 from __future__ import absolute_import, division, print_function
 
 import json
-from typing import List
+from typing import List, Sequence
 
 import tensorflow.compat.v1 as tf
 import tqdm
@@ -132,7 +132,7 @@ def _get_restored_predictions(
 
 
 def restore_from_clauses(
-    predictions: List[Prediction],
+    predictions: Sequence[Prediction],
     spider_examples_json="",
     spider_tables_json="",
     michigan_schema=None,
