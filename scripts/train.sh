@@ -2,12 +2,16 @@
 
 set -euo pipefail
 
+# force use to set CUDA_VISIBLE_DEVICES before running this script.
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} 
 
+# strip trailing slashes
+EXPERIMENT_DIR=$(realpath --canonicalize-missing ${EXPERIMENT_DIR})
+
 DATA_DIR=${DATA_DIR:-"data"}
-EXPERIMENT_DIR=${EXPERIMENT_DIR:-"xsp_experiment_run"}
 OUTPUT_VOCAB_FILE=${OUTPUT_VOCAB_FILE:-"${EXPERIMENT_DIR}/assets/output_vocab.txt"}
 PREDICTIONS_DIR=${PREDICTIONS_DIR:-"${EXPERIMENT_DIR}/predictions"}
+
 
 python -m language.xsp.training.train_model \
   --tf_examples_dir=${EXPERIMENT_DIR}/tf_records/ \

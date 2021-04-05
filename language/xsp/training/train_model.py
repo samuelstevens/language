@@ -95,28 +95,46 @@ flags.DEFINE_string("spider_tables_json", "", "Path to Spider json tables.")
 KEEP_CHECKPOINTS_MAX = 5
 
 
-def should_save_latest_checkpoint(experiment: keepsake.experiment.Experiment) -> bool:
+def checkpoints_to_delete(experiment: keepsake.experiment.Experiment) -> List[int]:
+    """
+    Returns a list of checkpoints that can be safely deleted.
+
+    Any checkpoint with worse performance than the best that is not the most recent checkpoint can be safely deleted
+    """
     best = experiment.best()
+
+    if not best:
+        return []
+
     latest = experiment.latest()
 
     comparison = (
         operator.ge if best.primary_metric["goal"] == "maximize" else operator.le
     )
 
-    primary_metric = best.primary_metric["name"]
+    to_delete = []
 
-    return comparison(latest.metrics[primary_metric], best.metrics[primary_metric])
+    for checkpoint in experiment.checkpoints:
+        if checkpoint.id == latest.id:
+            continue
+
+        if checkpoint.id == best.id:
+            continue
+
+        to_delete.append(checkpoint.step)
+
+    return to_delete
 
 
-def checkpoint_path(step: int) -> str:
-    return f"{FLAGS.model_dir}/ckpt-{step}"
+def checkpoint_path(model_dir: str, step: int) -> str:
+    return os.path.join(model_dir, f"ckpt-{step}")
 
 
 def delete_checkpoint(model_dir: Union[str, pathlib.Path], num: int) -> None:
     if isinstance(model_dir, str):
         model_dir = pathlib.Path(model_dir)
 
-    for checkpoint_file in (model_dir / f"ckpt-{num}").glob("*"):
+    for checkpoint_file in pathlib.Path(model_dir).glob(f"ckpt-{num}*"):
         os.remove(checkpoint_file)
 
 
@@ -228,12 +246,10 @@ def main(unused_argv: Any) -> None:
             model_config.load_config(FLAGS.config),
         )
 
-        # each checkpoint is ~1.3 GB, so 20 is ~25GB.
-        # TODO(samuelstevens): This can be turned down once I know a rough estimate for how many steps the model should train (based on validation loss).
-        saver = tf.train.Saver(max_to_keep=20)
+        saver = tf.train.Saver(max_to_keep=KEEP_CHECKPOINTS_MAX)
 
         global_step = 0
-        checkpoint = checkpoint_path(global_step)
+        checkpoint = checkpoint_path(FLAGS.model_dir, global_step)
 
         validation_query_cache: Dict[str, Any] = {}
 
@@ -270,7 +286,7 @@ def main(unused_argv: Any) -> None:
                 train_loss = statistics.mean(train_losses)
 
                 global_step += FLAGS.steps_between_saves
-                checkpoint = checkpoint_path(global_step)
+                checkpoint = checkpoint_path(FLAGS.model_dir, global_step)
                 saver.save(train_sess, checkpoint)
             # endregion
 
@@ -318,9 +334,8 @@ def main(unused_argv: Any) -> None:
 
             # region disk management
 
-            if not should_save_latest_checkpoint(experiment):
-                # it was already saved to disk, so now delete it.
-                delete_checkpoint(FLAGS.model_dir, global_step)
+            for step in checkpoints_to_delete(experiment):
+                delete_checkpoint(FLAGS.model_dir, step)
 
             # endregion
 
