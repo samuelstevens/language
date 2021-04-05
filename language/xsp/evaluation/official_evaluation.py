@@ -41,7 +41,7 @@ from tqdm import tqdm
 from language.xsp.model.inference import ExecutionInstructions, Prediction
 
 # Maximum allowable timeout for executing predicted and gold queries.
-TIMEOUT = 60
+TIMEOUT = 30
 
 # Maximum number of candidates we should consider
 MAX_CANDIDATE = 20
@@ -101,6 +101,15 @@ class ExecutionResult(NamedTuple):
 
     gold_error_cause: Optional[ExecutionError]
     gold_error_message: Optional[str]
+
+    def __str__(self) -> str:
+        """Returns a json string"""
+        dct = self._asdict()
+        for key in dct:
+            if isinstance(dct[key], ExecutionError):
+                dct[key] = str(ExecutionError)
+
+        return json.dumps(dct)
 
 
 class Metrics(NamedTuple):
@@ -389,9 +398,7 @@ def execute_prediction(
     return best_prediction, pred_results, exception_str, execution_time
 
 
-def write_results(results: Sequence[ExecutionResult], ofile) -> None:
-    metrics = aggregate_metrics(results)
-
+def write_results(results: Sequence[ExecutionResult], metrics: Metrics, ofile) -> None:
     for i, result in enumerate(results):
         ofile.write("Example #" + str(i) + "\n")
 
@@ -423,7 +430,7 @@ def write_results(results: Sequence[ExecutionResult], ofile) -> None:
             ofile.write("Gold table was EMPTY!\n")
 
         ofile.write(f"Column F1: {result.column_f1}\n")
-        ofile.write(f"Column F1: {result.table_f1}\n")
+        ofile.write(f"Table F1: {result.table_f1}\n")
 
         ofile.write("Execution was correct? " + str(result.equivalent) + "\n")
 
@@ -465,7 +472,9 @@ def write_results(results: Sequence[ExecutionResult], ofile) -> None:
     ofile.flush()
 
 
-def aggregate_metrics(results: Sequence[ExecutionResult]) -> Metrics:
+def aggregate_metrics(
+    results: Sequence[ExecutionResult], consider_empty_results: bool
+) -> Metrics:
     assert len(results) > 0, "Must have at least one result!"
     exec_results_same = []
     string_same = []
@@ -485,7 +494,6 @@ def aggregate_metrics(results: Sequence[ExecutionResult]) -> Metrics:
     gold_error = 0.0
 
     for result in results:
-
         if result.best_prediction:
             string_same.append(string_acc(result.gold_query, result.best_prediction))
             column_f1s.append(result.column_f1)
@@ -497,9 +505,9 @@ def aggregate_metrics(results: Sequence[ExecutionResult]) -> Metrics:
 
             conversion_errors += 1
 
-        if result.pred_results:
+        if result.pred_results or consider_empty_results:
             precisions.append(int(result.equivalent))
-        if result.gold_results:
+        if result.gold_results or consider_empty_results:
             recalls.append(int(result.equivalent))
 
         if result.error_cause:
@@ -627,7 +635,7 @@ def execute_predictions(
                 print(exception_str)
                 print("For SQL string:")
                 print(best_prediction)
-                error_case = ExecutionError.unknown
+                error_cause = ExecutionError.unknown
 
             # Predicted table should be empty for all of these cases.
             pred_results = []
@@ -725,11 +733,6 @@ def execute_predictions(
     return results, cache_dict
 
 
-def to_json(results: Sequence[ExecutionResult]) -> str:
-    metrics = aggregate_metrics(results)
-    return json.dumps(metrics._asdict())
-
-
 def main(
     predictions_filepath: str,
     output_filepath: str,
@@ -737,6 +740,7 @@ def main(
     verbose: bool,
     update_cache: bool,
     format: str,
+    use_empty_tables: bool,
 ):
     assert predictions_filepath.endswith(
         ".json"
@@ -768,15 +772,17 @@ def main(
         predictions, cache_dict, "scholar" not in basefilename, verbose, update_cache,
     )
 
+    metrics = aggregate_metrics(results, use_empty_tables)
+
+    # Create the text file that results will be written to.
     if format == "txt":
-        # Create the text file that results will be written to.
         with open(output_filepath, "w") as ofile:
-            write_results(results, ofile)
+            write_results(results, metrics, ofile)
     elif format == "json":
-        # just print a json object
-        print(to_json(results))
-    else:
-        raise ValueError(f"{format} is not a valid format")
+        with open(output_filepath, "w") as ofile:
+            for result in results:
+                ofile.write(json.dumps(str(result)) + "\n")
+        print(json.dumps(metrics._asdict()))
 
     if "spider" not in basefilename:
         try:
@@ -810,6 +816,11 @@ if __name__ == "__main__":
         help="If set to True, will execute and cache gold queries.",
     )
     parser.add_argument("--format", type=str, default="txt", help="either txt or json")
+    parser.add_argument(
+        "--use_empty_tables",
+        type=bool,
+        help="Whether to consider empty tables when calculating aggregate metrics",
+    )
     args = parser.parse_args()
 
     main(
@@ -819,4 +830,5 @@ if __name__ == "__main__":
         args.verbose,
         args.update_cache,
         args.format,
+        args.use_empty_tables,
     )

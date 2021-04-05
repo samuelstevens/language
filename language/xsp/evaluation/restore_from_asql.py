@@ -18,7 +18,7 @@
 from __future__ import absolute_import, division, print_function
 
 import json
-from typing import List, Sequence
+from typing import Any, Dict, List, Sequence, Tuple
 
 import tensorflow.compat.v1 as tf
 import tqdm
@@ -75,14 +75,14 @@ def _utterance_to_db_map(spider_examples_json, spider_tables_json):
 
 
 def _get_restored_predictions(
-    predictions_dict,
+    predictions_dict: Prediction,
     utterance_to_db_map=None,
     schema=None,
     dataset_name=None,
-    use_oracle_foreign_keys=False,
-):
+    use_oracle_foreign_keys: bool = False,
+) -> Tuple[Prediction, int]:
     """
-    Returns new predictions dict with FROM clauses restored.
+    Returns new predictions dict with FROM clauses restored and a count of errors.
     """
     utterance = predictions_dict["utterance"]
     if utterance_to_db_map:
@@ -103,6 +103,8 @@ def _get_restored_predictions(
 
     restored_predictions = []
     restored_scores = []
+    error_count = 0
+
     for prediction, score in zip(
         predictions_dict["predictions"], predictions_dict["scores"]
     ):
@@ -119,16 +121,20 @@ def _get_restored_predictions(
             # Remove predictions that fail conversion.
             print("For query %s" % prediction)
             print("Unsupport Error: " + str(e))
+            error_count += 1
         except abstract_sql.ParseError as e:
             print("For query %s" % prediction)
             print("Parse Error: " + str(e))
+            error_count += 1
 
-    restored_predictions_dict = {
-        "utterance": utterance,
-        "predictions": restored_predictions,
-        "scores": restored_scores,
-    }
-    return restored_predictions_dict
+    return (
+        {
+            "utterance": utterance,
+            "predictions": restored_predictions,
+            "scores": restored_scores,
+        },
+        error_count,
+    )
 
 
 def restore_from_clauses(
@@ -171,17 +177,23 @@ def restore_from_clauses(
             "or a Michigan schema object."
         )
 
+    error_count = 0
+
     # Restore from clauses.
     restored_predictions = []
     for prediction in tqdm.tqdm(predictions):
-        restored_predictions.append(
-            _get_restored_predictions(
-                prediction,
-                utterance_to_db_map,
-                michigan_schema,
-                dataset_name,
-                use_oracle_foreign_keys,
-            )
+        restored, err = _get_restored_predictions(
+            prediction,
+            utterance_to_db_map,
+            michigan_schema,
+            dataset_name,
+            use_oracle_foreign_keys,
         )
+        restored_predictions.append(restored)
+        error_count += err
+
+    print(
+        f"Saw {error_count} errors (of {sum(len(p['predictions']) for p in predictions)} predictions)."
+    )
 
     return restored_predictions
