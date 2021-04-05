@@ -5,9 +5,7 @@ bert/
 __pycache__/
 *.swp
 .ipynb_checkpoints/
-predictions/
-xsp_experiment_run/
-.replicate/
-spider_ssp/
+experiments/
+notebooks/
 .keepsake/
 keepsake.yaml
