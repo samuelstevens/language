@@ -58,6 +58,42 @@ class CheckpointManagementTest(absltest.TestCase):
         self.assertEqual(train_model.checkpoints_to_delete(experiment), [200])
         experiment.delete()
 
+    def test_only_one_checkpoint(self) -> None:
+        experiment = keepsake.init(params={})
+        experiment.checkpoint(
+            step=100,
+            metrics={"eval_execution_f1": 0.7},
+            primary_metric=("eval_execution_f1", "maximize"),
+        )
+        self.assertEqual(train_model.checkpoints_to_delete(experiment), [])
+        experiment.delete()
+
+    def test_real_example(self) -> None:
+        experiment = keepsake.init()
+        checkpoints = [
+            (10000, 0.42, 1.34),
+            (20000, 0.56, 0.17),
+            (30000, 0.59363, 0.10),
+            (40000, 0.58, 0.076),
+            (50000, 0.61, 0.06),
+            (60000, 0.61, 0.04),
+            (70000, 0.61, 0.04),
+            (80000, 0.61, 0.03),
+            (90000, 0.62, 0.02),
+            (100000, 0.61, 0.02),
+        ]
+        for step, eval_score, train_score in checkpoints:
+            experiment.checkpoint(
+                step=step,
+                metrics={"eval": eval_score, "train": train_score},
+                primary_metric=("eval", "maximize"),
+            )
+
+        self.assertEqual(
+            train_model.checkpoints_to_delete(experiment),
+            [10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000],
+        )
+
     def test_delete_missing_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             train_model.delete_checkpoint(tmpdir, 0)

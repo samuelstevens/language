@@ -102,17 +102,12 @@ def checkpoints_to_delete(experiment: keepsake.experiment.Experiment) -> List[in
     Any checkpoint with worse performance than the best that is not the most recent checkpoint can be safely deleted
     """
     best = experiment.best()
-
-    if not best:
-        return []
-
     latest = experiment.latest()
 
-    comparison = (
-        operator.ge if best.primary_metric["goal"] == "maximize" else operator.le
-    )
-
     to_delete = []
+
+    if not best or not latest:
+        return to_delete
 
     for checkpoint in experiment.checkpoints:
         if checkpoint.id == latest.id:
@@ -335,6 +330,10 @@ def main(unused_argv: Any) -> None:
             # region disk management
 
             for step in checkpoints_to_delete(experiment):
+                assert (
+                    step != global_step
+                ), f"Can't delete step {step}; need it for next training epoch starting at step {global_step}"
+                print(f"Deleting checkpoint {step}")
                 delete_checkpoint(FLAGS.model_dir, step)
 
             # endregion
