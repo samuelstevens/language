@@ -16,53 +16,53 @@
 
 from __future__ import absolute_import, division, print_function
 
+import dataclasses
+from typing import Any, Dict, List
+
 from language.xsp.data_preprocessing.language_utils import Wordpiece, get_wordpieces
 from language.xsp.data_preprocessing.schema_utils import (
     DatabaseTable,
+    Schema,
     get_schema_entities,
     process_tables,
 )
 from language.xsp.data_preprocessing.sql_utils import SQLQuery
 
 
+@dataclasses.dataclass
 class NLToSQLInput(object):
     """Contains information about the input to a NL to SQL model."""
 
-    def __init__(self):
-        self.original_utterance = None
-        self.utterance_wordpieces = list()
-        self.tables = list()
+    original_utterance: str
+    utterance_wordpieces: List[Wordpiece]
+    tables: List[DatabaseTable]
 
     def to_json(self):
         """Returns the JSON form of this class."""
-        return {
-            "utterance_wordpieces": [
-                wordpiece.to_json() for wordpiece in self.utterance_wordpieces
-            ],
-            "tables": [table.to_json() for table in self.tables],
-            "original_utterance": self.original_utterance,
-        }
+        return dataclasses.asdict(self)
 
-    def from_json(self, dictionary):
+    @staticmethod
+    def from_json(dictionary: Dict[str, Any]) -> "NLToSQLInput":
         """Loads the NLToSQLInput attributes from a dictionary."""
-        self.original_utterance = dictionary["original_utterance"]
-        self.tables = [
-            DatabaseTable().from_json(table) for table in dictionary["tables"]
-        ]
-        self.utterance_wordpieces = [
-            Wordpiece().from_json(wordpiece)
+        original_utterance = dictionary["original_utterance"]
+        utterance_wordpieces = [
+            Wordpiece.from_json(wordpiece)
             for wordpiece in dictionary["utterance_wordpieces"]
         ]
+        tables = [DatabaseTable.from_json(table) for table in dictionary["tables"]]
+        return NLToSQLInput(original_utterance, utterance_wordpieces, tables)
 
-        return self
+    @staticmethod
+    def empty(utterance: str) -> "NLToSQLInput":
+        return NLToSQLInput(utterance, [], [])
 
 
+@dataclasses.dataclass
 class NLToSQLExample(object):
     """Contains both inputs and outputs for a NL to SQL example."""
 
-    def __init__(self):
-        self.model_input = NLToSQLInput()
-        self.gold_sql_query = SQLQuery()
+    model_input: NLToSQLInput
+    gold_sql_query: SQLQuery
 
     def to_json(self):
         return {
@@ -70,13 +70,16 @@ class NLToSQLExample(object):
             "gold_sql_query": self.gold_sql_query.to_json(),
         }
 
-    def from_json(self, dictionary):
-        self.model_input = self.model_input.from_json(dictionary["model_input"])
-        self.gold_sql_query = self.gold_sql_query.from_json(
-            dictionary["gold_sql_query"]
+    @staticmethod
+    def from_json(dictionary) -> "NLToSQLExample":
+        return NLToSQLExample(
+            NLToSQLInput.from_json(dictionary["model_input"]),
+            SQLQuery.from_json(dictionary["gold_sql_query"]),
         )
 
-        return self
+    @staticmethod
+    def empty(utterance: str) -> "NLToSQLExample":
+        return NLToSQLExample(NLToSQLInput.empty(utterance), SQLQuery.empty())
 
     def gold_query_string(self):
         """Generates a query string from the decoder actions for an example."""
@@ -100,9 +103,8 @@ class NLToSQLExample(object):
         )
 
 
-def populate_utterance(example, utterance, schema, tokenizer):
+def populate_utterance(example: NLToSQLExample, schema: Schema, tokenizer) -> None:
     """Sets the model input for a NLToSQLExample."""
-    example.model_input.original_utterance = utterance
 
     schema_entities = get_schema_entities(schema)
 
@@ -118,6 +120,4 @@ def populate_utterance(example, utterance, schema, tokenizer):
             process_tables(schema, tokenizer, aligned_schema_entities)
         )
     except UnicodeDecodeError as e:
-        print(unicode(e))
-        return None
-    return example
+        print(e)

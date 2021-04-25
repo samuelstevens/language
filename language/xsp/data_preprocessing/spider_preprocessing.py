@@ -14,18 +14,43 @@
 # limitations under the License.
 """Contains functions for loading and preprocessing the Spider data."""
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import sqlparse
-import tensorflow.compat.v1.gfile as gfile
+from prelude import flattened
+from typing_extensions import TypedDict
 
 from language.xsp.data_preprocessing import abstract_sql_converters
+from language.xsp.data_preprocessing.abstract_sql import TableSchema
 from language.xsp.data_preprocessing.nl_to_sql_example import (
     NLToSQLExample,
     populate_utterance,
 )
-from language.xsp.data_preprocessing.sql_parsing import populate_sql
+from language.xsp.data_preprocessing.schema_utils import Column, Schema, TableName
+from language.xsp.data_preprocessing.sql_parsing import ParseError, populate_sql
 from language.xsp.data_preprocessing.sql_utils import preprocess_sql
+
+
+class SpiderExample(TypedDict):
+    db_id: str
+    query: str
+    query_toks: List[str]
+    query_toks_no_value: List[str]
+    question: str
+    question_toks: List[str]
+    sql: Dict[str, Any]
+
+
+class RawSpiderTable(TypedDict):
+    column_names: List[Tuple[int, str]]
+    column_names_original: List[Tuple[int, str]]
+    column_types: List[str]
+    db_id: str
+    foreign_keys: List[Tuple[int, int]]
+    primary_keys: List[int]
+    table_names: List[str]
+    table_names_original: List[str]
+
 
 WRONG_TRAINING_EXAMPLES = {
     # In this query the SQL query mentions a ref_company_types table that is not
@@ -35,102 +60,114 @@ WRONG_TRAINING_EXAMPLES = {
 }
 
 
-def process_dbs(raw_dbs):
-    """Converts database specification directly from Spider to our format."""
-    dbs = dict()
+def process_dbs(raw_dbs: Sequence[RawSpiderTable]) -> Dict[str, Schema]:
+    """
+    Converts database specification directly from Spider to our format.
+    """
+    dbs: Dict[str, Schema] = {}
 
     # Should return a list of databases, each which is a dictionary whose keys are
     # table names, and values are columns; columns have 'field name',
     # 'is foreign key', 'is primary key', and 'type' annotations.
     for db in raw_dbs:
-        db_dict = dict()
-        for table in db["table_names_original"]:
-            db_dict[table] = list()
-        all_foreign_indices = set(
-            [k[0] for k in db["foreign_keys"]] + [k[1] for k in db["foreign_keys"]]
-        )
+        db_dict: Schema = {}
+        for table in map(TableName, db["table_names_original"]):
+            db_dict[table] = []
+        all_foreign_indices: Set[int] = set(flattened(db["foreign_keys"]))
+
+        # set(
+        #     [k[0] for k in db["foreign_keys"]] + [k[1] for k in db["foreign_keys"]]
+        # )
         for global_column_idx, (table_idx, column_name) in enumerate(
             db["column_names_original"]
         ):
             if table_idx >= 0:
                 is_primary_key = global_column_idx in db["primary_keys"]
                 is_foreign_key = global_column_idx in all_foreign_indices
-                column_dict = {
+                column_dict: Column = {
                     "field name": column_name,
                     "is primary key": is_primary_key,
                     "is foreign key": is_foreign_key,
                     "type": db["column_types"][global_column_idx],
                 }
-                db_dict[db["table_names_original"][table_idx]].append(column_dict)
+                db_dict[TableName(db["table_names_original"][table_idx])].append(
+                    column_dict
+                )
         dbs[db["db_id"]] = db_dict
     return dbs
 
 
-def load_spider_tables(filenames) -> Dict[Any, Any]:
+def load_spider_tables(filenames: str) -> Dict[str, Schema]:
     """Loads database schemas from the specified filenames."""
     examples = {}
     for filename in filenames.split(","):
-        with gfile.GFile(filename) as training_file:
+        with open(filename) as training_file:
             examples.update(process_dbs(json.load(training_file)))
     return examples
 
 
-def load_spider_examples(filenames) -> List[Any]:
+def load_spider_examples(filenames) -> List[SpiderExample]:
     """Loads examples from the Spider dataset from the specified files."""
     examples = []
     for filename in filenames.split(","):
-        with gfile.GFile(filename) as training_file:
+        with open(filename) as training_file:
             examples += json.load(training_file)
     return examples
 
 
 def convert_spider(
-    spider_example,
-    schema,
+    spider_example: SpiderExample,
+    schema: Schema,
     wordpiece_tokenizer,
     generate_sql,
     anonymize_values,
     abstract_sql=False,
-    table_schemas=None,
+    table_schemas: Optional[List[TableSchema]] = None,
     allow_value_generation=False,
-):
-    """Converts a Spider example to the standard format.
+) -> Optional[NLToSQLExample]:
+    """
+    Converts a Spider example to the standard format.
 
-  Args:
-    spider_example: JSON object for SPIDER example in original format.
-    schema: JSON object for SPIDER schema in converted format.
-    wordpiece_tokenizer: language.bert.tokenization.FullTokenizer instance.
-    generate_sql: If True, will populate SQL.
-    anonymize_values: If True, anonymizes values in SQL.
-    abstract_sql: If True, use under-specified FROM clause.
-    table_schemas: required if abstract_sql, list of TableSchema tuples.
-    allow_value_generation: Allow value generation.
+    Args:
+        spider_example: JSON object for SPIDER example in original format.
+        schema: JSON object for SPIDER schema in converted format.
+        wordpiece_tokenizer: language.bert.tokenization.FullTokenizer instance.
+        generate_sql: If True, will populate SQL.
+        anonymize_values: If True, anonymizes values in SQL.
+        abstract_sql: If True, use under-specified FROM clause.
+        table_schemas: required if abstract_sql, list of TableSchema tuples.
+        allow_value_generation: Allow value generation.
 
-  Returns:
-    NLToSQLExample instance.
-  """
+    Returns:
+        NLToSQLExample instance.
+    """
     if spider_example["question"] in WRONG_TRAINING_EXAMPLES:
         return None
 
-    sql_query = spider_example["query"].rstrip("; ")
-    sql_query = sqlparse.parse(preprocess_sql(sql_query.lower()))[0]
+    sql_query: sqlparse.sql.Statement = sqlparse.parse(
+        preprocess_sql(spider_example["query"].rstrip("; ").lower())
+    )[0]
 
-    example = NLToSQLExample()
+    nl_query = " ".join(spider_example["question_toks"])
+
+    example = NLToSQLExample.empty(nl_query)
 
     # Set the input
-    populate_utterance(
-        example, " ".join(spider_example["question_toks"]), schema, wordpiece_tokenizer
-    )
+    populate_utterance(example, schema, wordpiece_tokenizer)
 
     # Set the output
     successful_copy = True
     if generate_sql:
         if abstract_sql:
+            assert table_schemas
             successful_copy = abstract_sql_converters.populate_abstract_sql(
                 example, spider_example["query"], table_schemas, anonymize_values
             )
         else:
-            successful_copy = populate_sql(sql_query, example, anonymize_values)
+            try:
+                successful_copy = populate_sql(sql_query, example, anonymize_values)
+            except ParseError:
+                return None
 
     # If the example contained an unsuccessful copy action, and values should not
     # be generated, then return an empty example.

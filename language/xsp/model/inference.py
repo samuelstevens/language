@@ -432,7 +432,7 @@ def match_with_dataset(
 
     elif config.dataset_name.lower() == "wikisql":
         raise ValueError("Inference on WikiSQL not supported.")
-    else:
+    else:  # michigan datasets
         dataset_path: str = os.path.join(
             config.original_data_directory, config.dataset_name + ".json"
         )
@@ -443,6 +443,7 @@ def match_with_dataset(
             # Returns a dictionary containing relevant prediction information.
             database_filepath = config.dataset_name + ".db"
 
+            assert len(prediction_dict) > 0
             prediction = prediction_dict[key]
 
             matched_examples.append(

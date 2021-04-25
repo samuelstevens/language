@@ -15,12 +15,24 @@
 """For converting from a SQL query to output/decoder actions."""
 from __future__ import absolute_import, division, print_function
 
-import sqlparse
+import re
+from typing import Dict, List, Optional, Sequence, Union, overload
 
+import sqlparse
+from prelude import flattened
+from typing_extensions import Literal
+
+from language.xsp.data_preprocessing.nl_to_sql_example import NLToSQLExample
 from language.xsp.data_preprocessing.schema_utils import DatabaseTable, TableColumn
 from language.xsp.data_preprocessing.sql_utils import SchemaEntityCopy, SQLAction
 
-VALID_GENERATED_TOKENS = {"1"}
+
+def _is_valid_generated_token(tok: str) -> bool:
+    # numbers are ok to generate
+    if re.match(r"\d+", tok):
+        return True
+
+    return False
 
 
 class ParseError(Exception):
@@ -105,20 +117,14 @@ def _is_integer(item):
 
 
 def _is_table_alias(item):
-    return _is_name(item) and item.value in (
-        "t1",
-        "t2",
-        "t3",
-        "t4",
-        "t5",
-        "t6",
-        "t7",
-        "t8",
-        "t9",
-    )
+    return _is_name(item) and re.match(r"t\d+", item.value.lower())
 
 
-def _add_simple_step(item, example):
+def _is_whitespace(item):
+    return item.ttype is sqlparse.tokens.Whitespace
+
+
+def _add_simple_step(item, example: NLToSQLExample) -> None:
     example.gold_sql_query.actions.append(SQLAction(symbol=item.value.lower()))
 
 
@@ -128,30 +134,84 @@ def _debug_sql_item(item):
     print("Type is " + str(item.ttype))
     print("Value is " + str(item.value))
     print("String value is " + str(item))
+    # breakpoint()
 
 
 def _debug_state(item, example):
+    # breakpoint()
     del example
     _debug_sql_item(item)
     if hasattr(item, "_pprint_tree"):
         item._pprint_tree()  # pylint: disable=protected-access
 
 
-def _parse_function(sql, example, anonymize_values):
+def _is_single_arg_literal(sql) -> bool:
+    """Checks if it's ( 1 ) or ( * ), etc."""
+    assert _is_parenthesis(sql)
+
+    open_paren, *raw_args, close_paren = list(sql)
+
+    assert _is_punctuation(open_paren)
+    assert _is_punctuation(close_paren)
+
+    raw_args = [arg for arg in raw_args if not _is_whitespace(arg)]
+
+    if len(raw_args) != 1:
+        return False
+
+    arg = raw_args[0]
+
+    return _is_wildcard(arg) or _is_literal(arg)
+
+
+def _parse_single_arg(sql, example, anonymize_values: bool) -> bool:
+    assert _is_parenthesis(sql)
+
+    open_paren, *raw_args, close_paren = list(sql)
+
+    assert _is_punctuation(open_paren)
+    assert _is_punctuation(close_paren)
+
+    raw_args = [arg for arg in raw_args if not _is_whitespace(arg)]
+
+    literal = raw_args[0]
+
+    _add_simple_step(open_paren, example)
+    success = _add_simple_value(
+        literal, example, anonymize_values
+    ) or _is_valid_generated_token(literal.value)
+    _add_simple_step(close_paren, example)
+
+    return success
+
+
+def _parse_function(sql, example, anonymize_values: bool) -> bool:
     """Parse the part relative to a Function in the SQL query."""
     successful_copy = True
     for item in sql:
         if _is_parenthesis(item):
-            successful_copy = (
-                populate_sql(item, example, anonymize_values) and successful_copy
-            )
+            # (samuelstevens) Check if it's just a single literal inside the function (typically for a COUNT( 1 ) sort of thing).
+            if _is_single_arg_literal(item):
+                successful_copy = (
+                    _parse_single_arg(item, example, anonymize_values)
+                    and successful_copy
+                )
+            else:
+                successful_copy = (
+                    populate_sql(item, example, anonymize_values) and successful_copy
+                )
             continue
+
+        if item.ttype == sqlparse.tokens.Text.Whitespace:
+            continue
+
         if _is_identifier(item) and item.value.lower() in (
             "count",
             "avg",
             "min",
             "max",
             "sum",
+            "all",
             "distinct",
         ):
             _add_simple_step(item, example)
@@ -159,21 +219,63 @@ def _parse_function(sql, example, anonymize_values):
 
         _debug_state(item, example)
         raise ParseError("Incomplete _parse_function")
+
     return successful_copy
 
 
+@overload
 def _find_all_entities(
-    token, example, include_tables=True, include_columns=True, restrict_to_table=None
-):
-    """Tries to find schema entities that match the token."""
-    matching = list()
+    token,
+    example: NLToSQLExample,
+    include_tables: Literal[False],
+    include_columns: Literal[True],
+    restrict_to_table: DatabaseTable,
+) -> Sequence[TableColumn]:
+    ...
+
+
+@overload
+def _find_all_entities(
+    token,
+    example: NLToSQLExample,
+    include_tables: Literal[True],
+    include_columns: Literal[False],
+    restrict_to_table: None,
+) -> Sequence[DatabaseTable]:
+    ...
+
+
+@overload
+def _find_all_entities(
+    token,
+    example: NLToSQLExample,
+    include_tables: bool,
+    include_columns: bool,
+    restrict_to_table: None,
+) -> Sequence[Union[DatabaseTable, TableColumn]]:
+    ...
+
+
+def _find_all_entities(
+    token: str,
+    example: NLToSQLExample,
+    include_tables: bool,
+    include_columns: bool,
+    restrict_to_table: Optional[DatabaseTable],
+) -> Sequence[Union[DatabaseTable, TableColumn]]:
+    """
+    Tries to find schema entities that match the token.
+    """
     if restrict_to_table:
+        columns: List[TableColumn] = []
         assert include_columns
         assert not include_tables
         for column in restrict_to_table.table_columns:
-            if column.original_column_name.lower() == token.lower() and include_columns:
-                matching.append(column)
+            if column.original_column_name.lower() == token.lower():
+                columns.append(column)
+        return columns
     else:
+        matching: List[Union[DatabaseTable, TableColumn]] = []
         for table in example.model_input.tables:
             # Allow lowercase matching because the schema and gold query may not match
             if table.original_table_name.lower() == token.lower() and include_tables:
@@ -186,18 +288,49 @@ def _find_all_entities(
                 ):
                     matching.append(column)
 
-    return matching
+        return matching
 
 
-def _find_simple_entity(token, example, include_tables=True, include_columns=True):
+@overload
+def _find_simple_entity(
+    token,
+    example: NLToSQLExample,
+    include_tables: Literal[False],
+    include_columns: Literal[True],
+) -> Optional[TableColumn]:
+    ...
+
+
+@overload
+def _find_simple_entity(
+    token,
+    example: NLToSQLExample,
+    include_tables: Literal[True],
+    include_columns: Literal[False],
+) -> Optional[DatabaseTable]:
+    ...
+
+
+@overload
+def _find_simple_entity(
+    token, example: NLToSQLExample, include_tables: bool, include_columns: bool,
+) -> Union[None, DatabaseTable, TableColumn]:
+    ...
+
+
+def _find_simple_entity(
+    token, example: NLToSQLExample, include_tables: bool, include_columns: bool
+) -> Union[None, DatabaseTable, TableColumn]:
     """Finds entities in the schema that a token may be referring to."""
-    matching = _find_all_entities(token, example, include_tables, include_columns)
+    matching = _find_all_entities(token, example, include_tables, include_columns, None)
 
     if not matching:
         return None
 
     if len(matching) == 1:
         return matching[0]
+
+    return None
 
 
 def _get_tokens(item):
@@ -209,27 +342,42 @@ def _get_tokens(item):
         return []
 
 
-def _find_table_annotation(item, example):
+def _find_table_annotations(item, example: NLToSQLExample) -> List[DatabaseTable]:
     """Finds a reference to a table in the schema."""
     if _is_name(item):
-        return _find_simple_entity(item.value, example, include_columns=False)
+        entity = _find_simple_entity(
+            item.value, example, include_tables=True, include_columns=False
+        )
+        assert entity is not None
+        return [entity]
 
     tokens = _get_tokens(item)
 
     if len(tokens) == 1:
-        return _find_table_annotation(tokens[0], example)
+        return _find_table_annotations(tokens[0], example)
 
     # Assume it's AS
     if _is_identifier(item) and len(tokens) == 3:
-        return _find_table_annotation(tokens[0], example)
+        return _find_table_annotations(tokens[0], example)
+
+    # (samuelstevens) It could be an identifier list? Each identifier in the list could also be "table AS alias".
+    if _is_identifier_list(item):
+        return flattened(
+            [
+                _find_table_annotations(ident, example)
+                for ident in item.get_identifiers()
+            ]
+        )
 
     _debug_sql_item(item)
     raise ParseError("Cannot find table annotation")
 
 
-def _find_column_entities(token, example, table):
-    all_entities = _find_all_entities(
-        token, example, include_tables=False, restrict_to_table=table
+def _find_column_entities(
+    token: str, example: NLToSQLExample, table: DatabaseTable
+) -> Optional[TableColumn]:
+    all_entities: Sequence[TableColumn] = _find_all_entities(
+        token, example, False, True, table
     )
 
     # Make sure that there was only one found
@@ -249,7 +397,7 @@ def _iterate_sql(sql_parse):
             yield item
 
 
-def _get_all_aliases(sql, example):
+def _get_all_aliases(sql, example: NLToSQLExample) -> Dict[str, DatabaseTable]:
     """Returns a dictionary of aliases for the tables."""
     root = sql
     while True:
@@ -264,35 +412,36 @@ def _get_all_aliases(sql, example):
 
         tokens = _get_tokens(item.parent.parent)
         if len(tokens) == 3 and tokens[1].value.lower() == "as":
-            table_annotation = _find_table_annotation(tokens[0], example)
+            table_annotation = _find_table_annotations(tokens[0], example)[0]
             aliases[tokens[2].value.lower()] = table_annotation
 
     return aliases
 
 
-def _resolve_reference(item, example):
-    """Resolves an ambiguous token that matches multiple annotations.
+def _resolve_reference(item: sqlparse.sql.Token, example: NLToSQLExample) -> None:
+    """
+    Resolves an ambiguous token that matches multiple annotations.
 
-  Args:
-    item: position in the SQL parse where the search will start.
-    example: the QuikExample containing table and column annotations.
+    Args:
+        item: position in the SQL parse where the search will start.
+        example: the QuikExample containing table and column annotations.
 
-  Raises:
-    ParseError: if the ambiguity cannot be resolved.
-  """
-    prev_symbol = example.gold_sql_query.actions[
+    Raises:
+        ParseError: if the ambiguity cannot be resolved.
+    """
+    prev_symbol: str = example.gold_sql_query.actions[
         len(example.gold_sql_query.actions) - 1
     ].symbol
 
     if prev_symbol in ("join", "from"):
-        table_annotation = _find_table_annotation(item, example)
-        assert table_annotation, (
+        table_annotations = _find_table_annotations(item, example)
+        assert table_annotations, (
             "Cannot find a table annotation for item %s" % item.value
         )
-
-        example.gold_sql_query.actions.append(
-            SQLAction(entity_copy=SchemaEntityCopy(copied_table=table_annotation))
-        )
+        for table in table_annotations:
+            example.gold_sql_query.actions.append(
+                SQLAction(entity_copy=SchemaEntityCopy(copied_table=table))
+            )
         return
 
     parent = item.parent
@@ -311,7 +460,7 @@ def _resolve_reference(item, example):
         )
         return
 
-    def _find_direction(reverse):
+    def _find_direction(reverse: bool) -> bool:
         """Finds a column annotation in a given direction."""
         table_entities = _find_from_table(item, example, reverse=reverse)
 
@@ -326,7 +475,6 @@ def _resolve_reference(item, example):
                     SQLAction(entity_copy=SchemaEntityCopy(copied_column=entity))
                 )
                 return True
-
         raise ParseError("Unable to find annotation of table " + str(item))
 
     if prev_symbol in ("where", "by") or _is_where(parent) or _is_where(parent.parent):
@@ -342,17 +490,20 @@ def _resolve_reference(item, example):
     raise ParseError("Unable to find final annotation in any direction")
 
 
-def _find_from_table(item, example, reverse=False):
-    """Finds the table that is being queried.
+def _find_from_table(
+    item, example: NLToSQLExample, reverse: bool = False
+) -> Optional[List]:
+    """
+    Finds the table that is being queried.
 
-  Args:
-    item: position in the SQL parse where the search will start.
-    example: the QuikExample containing the table annotations.
-    reverse: if True will use backward search, otherwise forward.
+    Args:
+        item: position in the SQL parse where the search will start.
+        example: the QuikExample containing the table annotations.
+        reverse: if True will use backward search, otherwise forward.
 
-  Returns:
-    a list of QuikAnnotation that are tables or None.
-  """
+    Returns:
+        a list of QuikAnnotation that are tables or None.
+    """
     parent = item.parent
     next_token_index = parent.token_index(item)
     next_item = item
@@ -399,31 +550,33 @@ def _find_from_table(item, example, reverse=False):
         if _is_from(next_item):
             next_token_index, next_item = parent.token_next(next_token_index)
 
-            tables = list()
-            tables.append(_find_table_annotation(next_item, example))
+            tables: List[DatabaseTable] = []
+            annotation = _find_table_annotations(next_item, example)
+            if not annotation:
+                raise ValueError("No annotation found!")
+            tables.extend(_find_table_annotations(next_item, example))
 
             next_token_index, next_item = parent.token_next(next_token_index)
 
             if next_item and next_item.value.lower() == "join":
                 next_token_index, next_item = parent.token_next(next_token_index)
-                tables.append(_find_table_annotation(next_item, example))
+                tables.extend(_find_table_annotations(next_item, example))
 
             return tables
 
 
-def _add_simple_value(item, example, anonymize):
-    """Adds a value action to the output.
+def _add_simple_value(item, example: NLToSQLExample, anonymize: bool) -> bool:
+    """
+    Adds a value action to the output.
 
-  Args:
-    item: A string value present in the SQL query.
-    example: The NLToSQLExample being constructed.
-    anonymize: Whether to anonymize values (i.e., replace them with a 'value'
-      placeholder).  Returns a boolean indicating whether the value could be
-      copied from the input.
+    Args:
+        item: A string value present in the SQL query.
+        example: The NLToSQLExample being constructed.
+        anonymize: Whether to anonymize values (i.e., replace them with a 'value' placeholder).  Returns a boolean indicating whether the value could be copied from the input.
 
-  Returns:
-    Successful copy.
-  """
+    Returns:
+        Successful copy.
+    """
     if anonymize:
         example.gold_sql_query.actions.append(SQLAction(symbol="value"))
         return True
@@ -439,7 +592,7 @@ def _add_simple_value(item, example, anonymize):
     ):
         item_str = "'" + item_str + "'"
 
-    def find_and_add_copy_from_text(substr):
+    def find_and_add_copy_from_text(substr: str):
         """Finds a substring in the utterance and adds a copying action."""
         # It's a substring of the original utterance, but not so sure it could be
         # composed of wordpieces.
@@ -450,16 +603,21 @@ def _add_simple_value(item, example, anonymize):
             for j in range(i + 1, len(example.model_input.utterance_wordpieces) + 1):
                 # Compose a string. If it has ##, that means it's a wordpiece, so should
                 # not have a space in front.
-                composed_pieces = " ".join(
-                    [
-                        wordpiece.wordpiece
-                        for wordpiece in example.model_input.utterance_wordpieces[i:j]
-                    ]
-                ).replace(" ##", "")
+                composed_pieces = (
+                    " ".join(
+                        [
+                            piece.wordpiece
+                            for piece in example.model_input.utterance_wordpieces[i:j]
+                        ]
+                    )
+                    .replace(" ##", "")
+                    .replace(" .", ".")
+                    .replace(" - ", "-")
+                    .replace(" !", "!")
+                )
                 if substr.lower() == composed_pieces:
                     start_wordpiece = i
                     end_wordpiece = j
-
                     found = True
                     break
             if found:
@@ -475,16 +633,17 @@ def _add_simple_value(item, example, anonymize):
             return True
         return False
 
-    # First, check if this string could be copied from the wordpiece-tokenized
-    # inputs.
+    # First, check if this string could be copied from the wordpiece-tokenized inputs.
     quote_type = ""
     if item_str.lower() in example.model_input.original_utterance.lower():
         success = find_and_add_copy_from_text(item_str)
 
-        if not success or item_str in VALID_GENERATED_TOKENS:
+        # QUESTION(samuelstevens): why do they use "not" success? Shouldn't they add it only if it was successfully found?
+        # ANSWER(samuelstevens): Because find_and_add_copy_from_text already modifies example (appends an action)
+        if not success or _is_valid_generated_token(item_str):
             example.gold_sql_query.actions.append(SQLAction(symbol=item_str))
 
-        return success or item_str in VALID_GENERATED_TOKENS
+        return success or _is_valid_generated_token(item_str)
 
     elif item_str.startswith("'") and item_str.endswith("'"):
         quote_type = "'"
@@ -496,12 +655,12 @@ def _add_simple_value(item, example, anonymize):
             example.gold_sql_query.actions.append(SQLAction(symbol=quote_type))
 
             success = find_and_add_copy_from_text(item_str[1:-1])
-            if not success or item in VALID_GENERATED_TOKENS:
+            if not success or _is_valid_generated_token(item_str):
                 example.gold_sql_query.actions.append(SQLAction(symbol=item_str))
 
             example.gold_sql_query.actions.append(SQLAction(symbol=quote_type))
 
-            return success or item_str in VALID_GENERATED_TOKENS
+            return success or _is_valid_generated_token(item_str)
         elif (
             item_str[1] == "%"
             and item_str[-2] == "%"
@@ -511,25 +670,25 @@ def _add_simple_value(item, example, anonymize):
             example.gold_sql_query.actions.append(SQLAction(symbol="%"))
 
             success = find_and_add_copy_from_text(item_str[2:-2])
-            if not success or item in VALID_GENERATED_TOKENS:
+            if not success or _is_valid_generated_token(item_str):
                 example.gold_sql_query.actions.append(SQLAction(symbol=item_str[2:-2]))
 
             example.gold_sql_query.actions.append(SQLAction(symbol="%"))
             example.gold_sql_query.actions.append(SQLAction(symbol=quote_type))
 
-            return success or item_str in VALID_GENERATED_TOKENS
+            return success or _is_valid_generated_token(item_str)
 
     # Just add it as choice from the output vocabulary
-    if u"u s a" in item_str:
+    if "u s a" in item_str:
         raise ValueError("WHAT????????")
 
     example.gold_sql_query.actions.append(SQLAction(symbol=item_str))
 
     # A value of 1 is used for things like LIMIT 1 when ordering.
-    return item_str in VALID_GENERATED_TOKENS
+    return _is_valid_generated_token(item_str)
 
 
-def _parse_identifier(sql, example, anonymize_values):
+def _parse_identifier(sql, example: NLToSQLExample, anonymize_values: bool) -> bool:
     """Parse the part relative to an Identifier in the SQL query."""
     successful_copy = True
     for item in sql:
@@ -555,7 +714,7 @@ def _parse_identifier(sql, example, anonymize_values):
             continue
 
         if _is_name(item):
-            entity = _find_simple_entity(item.value, example)
+            entity = _find_simple_entity(item.value, example, True, True)
             if entity is not None:
                 schema_copy_action = None
 
@@ -583,6 +742,12 @@ def _parse_identifier(sql, example, anonymize_values):
                     )
             continue
 
+        if _is_function(item):
+            successful_copy = (
+                _parse_function(item, example, anonymize_values) and successful_copy
+            )
+            continue
+
         if _is_literal(item):
             prev_len = len(example.gold_sql_query.actions)
             successful_copy = (
@@ -600,7 +765,7 @@ def _parse_identifier(sql, example, anonymize_values):
     return successful_copy
 
 
-def _parse_operation(sql, example, anonymize_values):
+def _parse_operation(sql, example: NLToSQLExample, anonymize_values: bool):
     """Parse the part relative to an Operation in the SQL query."""
     successful_copy = True
     for item in sql:
@@ -613,6 +778,11 @@ def _parse_operation(sql, example, anonymize_values):
             continue
         if _is_operator(item):
             _add_simple_step(item, example)
+            continue
+        if _is_function(item):
+            successful_copy = (
+                _parse_function(item, example, anonymize_values) and successful_copy
+            )
             continue
 
         _debug_sql_item(item)
@@ -657,6 +827,12 @@ def _parse_identifier_list(sql, example, anonymize_values):
             _add_simple_step(item, example)
             continue
 
+        if _is_literal(item):
+            successful_copy = (
+                _add_simple_value(item, example, anonymize_values) and successful_copy
+            )
+            continue
+
         _debug_sql_item(item)
         raise ParseError("Incomplete _parse_identifier_list")
 
@@ -682,6 +858,7 @@ def _parse_comparison(sql, example, anonymize_values):
             successful_copy = (
                 _add_simple_value(item, example, anonymize_values) and successful_copy
             )
+
             if len(example.gold_sql_query.actions) == prev_len:
                 raise ValueError(
                     "Gold query did not change length when adding simple value!"
@@ -712,7 +889,7 @@ def _parse_comparison(sql, example, anonymize_values):
     return successful_copy
 
 
-def _parse_where(sql, example, anonymize_values):
+def _parse_where(sql, example: NLToSQLExample, anonymize_values: bool) -> bool:
     """Parse the part relative to the WHERE clause of the SQL query."""
     successful_copy = True
     for item in sql:
@@ -747,6 +924,10 @@ def _parse_where(sql, example, anonymize_values):
             continue
 
         if _is_keyword(item) and item.value.lower() in ("between", "and", "or"):
+            _add_simple_step(item, example)
+            continue
+
+        if _is_keyword(item) and item.value.lower() in ("is", "not null"):
             _add_simple_step(item, example)
             continue
 
@@ -801,24 +982,26 @@ def _parse_where(sql, example, anonymize_values):
 
         _debug_sql_item(item)
         raise ParseError("Incomplete _parse_where")
+
     return successful_copy
 
 
-def populate_sql(sql, example, anonymize_values):
-    """Creates a sequence of output / decoder actions from a raw SQL query.
+def populate_sql(
+    sql: sqlparse.sql.Statement, example: NLToSQLExample, anonymize_values: bool
+) -> bool:
+    """
+    Creates a sequence of output / decoder actions from a raw SQL query.
 
-  Args:
-    sql: The SQL query to convert.
-    example: The NLToSQLExample object to add output actions.
-    anonymize_values: Whether to anonymize values by replacing with a
-      placeholder.
+    Args:
+        sql: The SQL query to convert.
+        example: The NLToSQLExample object to add output actions.
+        anonymize_values: Whether to anonymize values by replacing with a placeholder.
 
-  Raises:
-    ParseError: if the SQL query can't be parsed.
+    Raises:
+        ParseError: if the SQL query can't be parsed.
 
-  Returns:
-    Boolean indicating whether all actions copying values from
-    the input utterance were successfully completed.
+    Returns:
+        Boolean indicating whether all actions copying values from the input utterance were successfully completed.
   """
     successful_copy = True
     for item in sql:
@@ -907,6 +1090,10 @@ def populate_sql(sql, example, anonymize_values):
             _add_simple_step(item, example)
             continue
 
+        if _is_keyword(item) and item.value.lower() in ("is", "not null", "in", "not"):
+            _add_simple_step(item, example)
+            continue
+
         if _is_keyword(item) and item.value.lower() in ("distinct",):
             _add_simple_step(item, example)
             continue
@@ -948,4 +1135,5 @@ def populate_sql(sql, example, anonymize_values):
 
         _debug_state(item, example)
         raise ParseError("Incomplete _parse_sql")
+
     return successful_copy

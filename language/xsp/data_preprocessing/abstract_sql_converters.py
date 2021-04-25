@@ -16,8 +16,11 @@
 
 from __future__ import absolute_import, division, print_function
 
+from typing import List
+
 from language.xsp.data_preprocessing import abstract_sql, schema_utils
-from language.xsp.data_preprocessing.sql_parsing import VALID_GENERATED_TOKENS
+from language.xsp.data_preprocessing.nl_to_sql_example import NLToSQLExample
+from language.xsp.data_preprocessing.sql_parsing import _is_valid_generated_token
 from language.xsp.data_preprocessing.sql_utils import SchemaEntityCopy, SQLAction
 
 
@@ -122,10 +125,10 @@ def _add_value_literal(item_str, example, anonymize):
     if item_str.lower() in example.model_input.original_utterance.lower():
         success = find_and_add_copy_from_text(item_str)
 
-        if not success or item_str in VALID_GENERATED_TOKENS:
+        if not success or _is_valid_generated_token(item_str):
             example.gold_sql_query.actions.append(SQLAction(symbol=item_str))
 
-        return success or item_str in VALID_GENERATED_TOKENS
+        return success or _is_valid_generated_token(item_str)
 
     elif item_str.startswith("'") and item_str.endswith("'"):
         quote_type = "'"
@@ -137,12 +140,12 @@ def _add_value_literal(item_str, example, anonymize):
             example.gold_sql_query.actions.append(SQLAction(symbol=quote_type))
 
             success = find_and_add_copy_from_text(item_str[1:-1])
-            if not success or item_str in VALID_GENERATED_TOKENS:
+            if not success or _is_valid_generated_token(item_str):
                 example.gold_sql_query.actions.append(SQLAction(symbol=item_str))
 
             example.gold_sql_query.actions.append(SQLAction(symbol=quote_type))
 
-            return success or item_str in VALID_GENERATED_TOKENS
+            return success or _is_valid_generated_token(item_str)
         elif (
             item_str[1] == "%"
             and item_str[-2] == "%"
@@ -152,20 +155,20 @@ def _add_value_literal(item_str, example, anonymize):
             example.gold_sql_query.actions.append(SQLAction(symbol="%"))
 
             success = find_and_add_copy_from_text(item_str[2:-2])
-            if not success or item_str in VALID_GENERATED_TOKENS:
+            if not success or _is_valid_generated_token(item_str):
                 example.gold_sql_query.actions.append(SQLAction(symbol=item_str[2:-2]))
 
             example.gold_sql_query.actions.append(SQLAction(symbol="%"))
             example.gold_sql_query.actions.append(SQLAction(symbol=quote_type))
 
-            return success or item_str in VALID_GENERATED_TOKENS
+            return success or _is_valid_generated_token(item_str)
 
     # Just add it as choice from the output vocabulary
     if u"u s a" in item_str:
         raise ValueError("WHAT????????")
     example.gold_sql_query.actions.append(SQLAction(symbol=item_str))
 
-    return item_str in VALID_GENERATED_TOKENS
+    return _is_valid_generated_token(item_str)
 
 
 def populate_example_from_sql_spans(sql_spans, example, anonymize):
@@ -317,7 +320,9 @@ def spider_db_to_table_tuples(db):
     return table_schemas
 
 
-def michigan_db_to_table_tuples(db):
+def michigan_db_to_table_tuples(
+    db: schema_utils.Schema,
+) -> List[abstract_sql.TableSchema]:
     """Returns list of abstract_sql.TableSchema from Michigan schema object."""
     table_schemas = list()
     for table_name, columns in db.items():
@@ -766,18 +771,24 @@ def spider_foreign_keys_map(schema):
     return {db["db_id"]: spider_db_to_foreign_key_tuples(db) for db in schema}
 
 
-def populate_abstract_sql(example, sql_string, table_schemas, anonymize):
-    """Populate SQL in example.
+def populate_abstract_sql(
+    example: NLToSQLExample,
+    sql_string: str,
+    table_schemas: List[abstract_sql.TableSchema],
+    anonymize: bool,
+):
+    """
+    Populate SQL in example.
 
-  Args:
-    example: NLToSQLExample instance with utterance populated.
-    sql_string: SQL query as string.
-    table_schemas: List of TableSchema tuples.
-    anonymize: Whether to anonymize string/numerical values.
+    Args:
+        example: NLToSQLExample instance with utterance populated.
+        sql_string: SQL query as string.
+        table_schemas: List of TableSchema tuples.
+        anonymize: Whether to anonymize string/numerical values.
 
-  Returns:
-    Successful copy.
-  """
+    Returns:
+        Successful copy.
+    """
     sql_spans = abstract_sql.sql_to_sql_spans(sql_string, table_schemas)
     sql_spans = abstract_sql.replace_from_clause(sql_spans)
 

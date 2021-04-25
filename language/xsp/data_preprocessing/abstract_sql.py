@@ -23,7 +23,6 @@ TODO(petershaw): A proper parser and grammar for SQL would improve robustness!
 
 from __future__ import absolute_import, division, print_function
 
-import collections
 from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple
 
 import sqlparse
@@ -107,15 +106,11 @@ class SqlSpan:
 
 
 # Represents a table and its alias in a query.
-SqlTable = collections.namedtuple("SqlTable", ["table_name", "alias"])
+SqlTable = NamedTuple("SqlTable", [("table_name", str), ("alias", Optional[str])])
 
 # Represents a table in the corresponding schema.
-TableSchema = collections.namedtuple(
-    "TableSchema",
-    [
-        "table_name",  # String name of table.
-        "column_names",  # List of strings for columns in table.
-    ],
+TableSchema = NamedTuple(
+    "TableSchema", [("table_name", str), ("column_names", List[str])],
 )
 
 # Represents a foreign-key relation between 2 tables.
@@ -151,7 +146,7 @@ class NoPathError(Exception):
     pass
 
 
-def _get_tables(tokens):
+def _get_tables(tokens: List[sqlparse.sql.Token]) -> List[SqlTable]:
     """Adds table(s) in sqlparse.sql.Token as SqlTable to sql_tables."""
     sql_tables = []
     table_names = set()
@@ -311,7 +306,7 @@ def _add_column_spans(
     sql_spans.append(SqlSpan(column=sql_column))
 
 
-def _get_sql_table(token_value):
+def _get_sql_table(token_value: str) -> SqlTable:
     """Returns SqlTable tuple for the given token_value."""
     token_value = token_value.lower()
     if " as " in token_value:
@@ -336,15 +331,20 @@ def _is_value_literal(sqlparse_token):
 
 
 def _populate_spans_for_token(
-    grouped_tokens, tables, aliases_to_table_names, table_schemas, sql_spans
-):
+    grouped_tokens,
+    tables,
+    aliases_to_table_names,
+    table_schemas,
+    sql_spans: List[SqlSpan],
+) -> None:
     """Add SqlSpan tuples to sql_spans given grouped_tokens and schema."""
     previous_token = None
     in_from_clause_context = False
+
     for token in grouped_tokens:
         is_table_mention = False
         if isinstance(token, list):
-            nested_spans = []
+            nested_spans: List[SqlSpan] = []
             _populate_spans_for_statement(token, nested_spans, table_schemas)
             sql_spans.append(SqlSpan(nested_statement=nested_spans))
             previous_token = None
@@ -381,10 +381,14 @@ def _populate_spans_for_token(
         previous_token = token
 
 
-def _populate_spans_for_statement(grouped_tokens, sql_spans, table_schemas):
+def _populate_spans_for_statement(
+    grouped_tokens: List[sqlparse.sql.Token], sql_spans: List[SqlSpan], table_schemas
+) -> None:
     """Populates sql_spans for list of tokens representing a SQL statement."""
+
     # List of SqlTable tuples.
     tables = _get_tables(grouped_tokens)
+
     # TODO(petershaw): Consider unaliased tables for handling ambiguous `*` case.
     aliases_to_table_names = {table.alias: table.table_name for table in tables}
     _populate_spans_for_token(
@@ -473,7 +477,7 @@ def _check_spans_against_schema(sql_spans, table_schemas):
                     )
 
 
-def _replace_from_placeholder(tokens):
+def _replace_from_placeholder(tokens) -> None:
     """Replace 'FROM' with placeholder symbol in tokens."""
     for token in tokens:
         if token.value.lower() == "from":
@@ -481,44 +485,51 @@ def _replace_from_placeholder(tokens):
 
 
 # TODO(alanesuhr): Test with lowercase=False (or make that the default)
-def sql_to_sql_spans(sql_string, table_schemas=None, lowercase=True):
-    """Parse sql_string to a list of SqlSpan tuples.
+def sql_to_sql_spans(sql_string: str, table_schemas=None, lowercase=True):
+    """
+    Parse sql_string to a list of SqlSpan tuples.
 
-  Args:
-    sql_string: The SQL query to convert.
-    table_schemas: List of TableSchema tuples.
-    lowercase: Whether to lowercase the SQL query.
+    Args:
+        sql_string: The SQL query to convert.
+        table_schemas: List of TableSchema tuples.
+        lowercase: Whether to lowercase the SQL query.
 
-  Returns:
-    List of SqlSpan tuples.
+    Returns:
+        List of SqlSpan tuples.
 
-  Raises:
-    ParseError: If the SQL query can't be parsed for unexpected reason.
-    UnsupportedSqlError: SQL query is not supported by Abstract SQL.
-  """
+    Raises:
+        ParseError: If the SQL query can't be parsed for unexpected reason.
+        UnsupportedSqlError: SQL query is not supported by Abstract SQL.
+    """
     if sql_string in BAD_SQL:
         raise UnsupportedSqlError("Query matched list of malformed queries.")
+
     # Get the root sqlparse.sql.Token for the expression.
     if lowercase:
         sql_string = sql_string.lower()
-    sql_string = sql_string.strip()
-    sql_string = sql_string.rstrip(";")
+    sql_string = sql_string.strip().rstrip(";")
+
     # sqlparse expects value literals to have single quotes.
     sql_string = sql_string.replace('"', "'")
+
     # Change FROM clause placeholder to avoid breaking sqlparse.
     has_from_placeholder = FROM_CLAUSE_PLACEHOLDER in sql_string
     if has_from_placeholder:
         sql_string = sql_string.replace(FROM_CLAUSE_PLACEHOLDER, "from")
+
     # Parse using sqlparse.
     sqlparse_output = sqlparse.parse(sql_string)
     if not sqlparse_output:
         raise ParseError("sqlparse.parse failed for %s" % sql_string)
     sqlparse_token = sqlparse_output[0]
+
     flat_tokens = _get_flattened_non_whitespace_tokens(sqlparse_token)
+
     if has_from_placeholder:
         _replace_from_placeholder(flat_tokens)
+
     grouped_tokens = _regroup_tokens(flat_tokens)
-    sql_spans = []
+    sql_spans: List[SqlSpan] = []
     _populate_spans_for_statement(grouped_tokens, sql_spans, table_schemas)
     if table_schemas:
         _check_spans_against_schema(sql_spans, table_schemas)

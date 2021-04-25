@@ -18,7 +18,7 @@
 from __future__ import absolute_import, division, print_function
 
 import json
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import List, Sequence, Tuple
 
 import tensorflow.compat.v1 as tf
 import tqdm

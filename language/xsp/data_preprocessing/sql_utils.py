@@ -16,7 +16,10 @@
 
 from __future__ import absolute_import, division, print_function
 
+from typing import Any, Dict, List, Optional
+
 import sqlparse
+from prelude import flattened
 
 from language.xsp.data_preprocessing import sqlparse_keyword_utils
 from language.xsp.data_preprocessing.language_utils import Wordpiece
@@ -25,25 +28,44 @@ from language.xsp.data_preprocessing.schema_utils import DatabaseTable, TableCol
 sqlparse_keyword_utils.remove_bad_sqlparse_keywords()
 
 
-class SQLTokenizer(object):
-    """A SQL tokenizer."""
+def tokenize(sql: str) -> List[str]:
+    """Tokenizes a SQL query into a list of SQL tokens."""
+    parsed = sqlparse.parse(sql)[0]
 
-    def __init__(self):
-        pass
+    # (samuelstevens) Rejoin functions with their parentheses: [count, (, 1, )] -> [count(, 1, )]
+    def flatten_except_functions(chunk) -> List[str]:
+        if isinstance(chunk, sqlparse.sql.Function):
+            real_tokens = [
+                tok for tok in chunk.tokens if tok.ttype != sqlparse.tokens.Whitespace
+            ]
+            assert len(real_tokens) == 2
+            ident, paren = real_tokens
 
-    def tokenize(self, sql):
-        """Tokenizes a SQL query into a list of SQL tokens."""
-        return [
-            str(token).strip()
-            for token in sqlparse.sql.TokenList(sqlparse.parse(sql)[0].tokens).flatten()
-            if str(token).strip()
-        ]
+            open_paren, *raw_args, close_paren = paren.tokens
+
+            assert open_paren.value == "("
+            assert close_paren.value == ")"
+
+            args = flattened([flatten_except_functions(tok) for tok in raw_args])
+
+            func_name = ident.value.strip()
+
+            return [func_name + "(", *args, ")"]
+
+        if isinstance(chunk, sqlparse.sql.TokenList):
+            return flattened([flatten_except_functions(tok) for tok in chunk])
+
+        return [chunk.value.strip()] if chunk.value.strip() else []
+
+    # want to flatten all tokens EXCEPT functions
+    return flatten_except_functions(parsed)
 
 
-def anonymize_aliases(sql):
+def anonymize_aliases(sql: str) -> List[str]:
     """Renames aliases to a consistent format (e.g., using T#)."""
-    sql_tokens = list()
-    tokens = SQLTokenizer().tokenize(sql)
+
+    sql_tokens = []
+    tokens = tokenize(sql)
 
     # First, split all TABLE.COLUMN examples into three tokens.
     for token in tokens:
@@ -59,14 +81,14 @@ def anonymize_aliases(sql):
             sql_tokens.append(token)
 
     # Create an alias dictionary that maps from table names to column names
-    alias_dict = dict()
+    alias_dict: Dict[str, str] = {}
     for token in sql_tokens:
         if "alias" in token and token not in alias_dict:
             alias_dict[token] = "T" + str(len(alias_dict) + 1)
 
     # Reconstruct the SQL query, this time replacing old alias names with the new
     # assigned alias names.
-    new_tokens = list()
+    new_tokens = []
     for token in sql_tokens:
         if token in alias_dict:
             new_tokens.append(alias_dict[token])
@@ -76,15 +98,20 @@ def anonymize_aliases(sql):
     return new_tokens
 
 
-def preprocess_sql(sql):
+def preprocess_sql(sql: str) -> str:
     """Preprocesses a SQL query into a clean string form."""
     return " ".join(anonymize_aliases(sql)).replace(" . ", ".")
 
 
-class SchemaEntityCopy(object):
+class SchemaEntityCopy:
     """A copy action from the schema."""
 
-    def __init__(self, copied_table=None, copied_column=None):
+    copied_table: Optional[DatabaseTable]
+    copied_column: Optional[TableColumn]
+
+    def __init__(
+        self, copied_table: DatabaseTable = None, copied_column: TableColumn = None
+    ):
         self.copied_table = copied_table
         self.copied_column = copied_column
 
@@ -94,14 +121,19 @@ class SchemaEntityCopy(object):
         if self.copied_column:
             return {"copied_column": self.copied_column.to_json()}
 
-    def from_json(self, dictionary):
+    @staticmethod
+    def from_json(dictionary) -> "SchemaEntityCopy":
         if "copied_table" in dictionary:
-            self.copied_table = DatabaseTable().from_json(dictionary["copied_table"])
-            return self
+            copied_table = DatabaseTable.from_json(dictionary["copied_table"])
+            return SchemaEntityCopy(copied_table=copied_table)
 
         if "copied_column" in dictionary:
-            self.copied_column = TableColumn().from_json(dictionary["copied_column"])
-            return self
+            copied_column = TableColumn.from_json(dictionary["copied_column"])
+            return SchemaEntityCopy(copied_column=copied_column)
+
+        raise ValueError(
+            f"Dictionary {dictionary} does not contain keys 'copied_table' or 'copied_column'"
+        )
 
     def __repr__(self):
         return (
@@ -128,7 +160,7 @@ class SQLAction(object):
         if self.utterance_copy:
             return {"utterance_copy": self.utterance_copy.to_json()}
 
-    def from_json(self, dictionary):
+    def from_json(self, dictionary) -> "SQLAction":
         """Converts from a JSON representation to a SQL action."""
         # Should only have one key -- any of the above keys.
         assert len(dictionary) == 1
@@ -141,29 +173,38 @@ class SQLAction(object):
             return self
 
         if "utterance_copy" in dictionary:
-            self.utterance_copy = Wordpiece().from_json(dictionary["utterance_copy"])
+            self.utterance_copy = Wordpiece.from_json(dictionary["utterance_copy"])
             return self
 
+        raise ValueError(
+            f"Dictionary with keys {dictionary.keys()} does not contain a good key!"
+        )
+
     def __repr__(self):
-        return f"(symbol: {self.symbol}, entity_copy: {self.entity_copy}, utterance_copy: {self.utterance_copy})"
+        return f"SQLAction(symbol='{self.symbol}', entity_copy='{self.entity_copy}', utterance_copy='{self.utterance_copy}')"
 
 
 class SQLQuery(object):
     """Contains information about a SQL query grounded in an utterance/schema."""
 
-    def __init__(self):
-        self.actions = list()
+    actions: List[SQLAction]
+
+    def __init__(self, actions: List[SQLAction]):
+        self.actions = actions
 
     def to_json(self):
         return {"actions": [action.to_json() for action in self.actions]}
 
-    def from_json(self, dictionary):
-        assert not self.actions
-        if dictionary:
-            for action in dictionary["actions"]:
-                self.actions.append(SQLAction().from_json(action))
-            return self
-        return None
+    @staticmethod
+    def from_json(dictionary: Dict[str, Any]) -> "SQLQuery":
+        actions = []
+        for action in dictionary["actions"]:
+            actions.append(SQLAction().from_json(action))
+        return SQLQuery(actions)
 
     def __repr__(self):
         return f"(actions: {self.actions})"
+
+    @staticmethod
+    def empty() -> "SQLQuery":
+        return SQLQuery([])

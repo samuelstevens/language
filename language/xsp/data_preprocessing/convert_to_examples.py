@@ -17,8 +17,8 @@ from __future__ import absolute_import, division, print_function
 
 import json
 import os
+from typing import Tuple
 
-import tensorflow.compat.v1.gfile as gfile
 from absl import app, flags
 
 from bert.tokenization import FullTokenizer
@@ -61,10 +61,7 @@ flags.DEFINE_bool("anonymize_values", False, "Whether to anonymize values.")
 flags.DEFINE_bool(
     "allow_value_generation",
     False,
-    "Whether to allow query values (that should be copied from "
-    "the input) to be produced through generation actions (i.e.,"
-    " not copied). If False, examples where copying actions "
-    "cannot be determined will be thrown out.",
+    "Whether to allow query values (that should be copied from the input) to be produced through generation actions (i.e., not copied). If False, examples where copying actions cannot be determined will be thrown out.",
 )
 
 flags.DEFINE_bool(
@@ -75,11 +72,11 @@ flags.DEFINE_bool(
 
 
 def _load_json_from_file(filename):
-    with gfile.GFile(filename) as json_file:
+    with open(filename) as json_file:
         return json.load(json_file)
 
 
-def process_spider(output_file, debugging_file, tokenizer):
+def process_spider(output_file, debugging_file, tokenizer) -> Tuple[int, int]:
     """Loads, converts, and writes Spider examples to the standard format."""
     if len(FLAGS.splits) > 1:
         raise ValueError("Not expecting more than one split for Spider.")
@@ -135,7 +132,7 @@ def process_spider(output_file, debugging_file, tokenizer):
     return num_examples_created, num_examples_failed
 
 
-def process_wikisql(output_file, debugging_file, tokenizer):
+def process_wikisql(output_file, debugging_file, tokenizer) -> Tuple[int, int]:
     """Loads, converts, and writes WikiSQL examples to the standard format."""
 
     if len(FLAGS.splits) > 1:
@@ -147,7 +144,9 @@ def process_wikisql(output_file, debugging_file, tokenizer):
 
     data_filepath = os.path.join(FLAGS.input_filepath, FLAGS.dataset_name + ".json")
 
-    paired_data = get_nl_sql_pairs(data_filepath, set(FLAGS.splits), with_dbs=True)
+    paired_data = get_nl_sql_pairs(
+        data_filepath, frozenset(FLAGS.splits), with_dbs=True
+    )
 
     table_definitions = load_wikisql_tables(
         os.path.join(FLAGS.input_filepath, split + ".tables.jsonl")
@@ -180,27 +179,43 @@ def process_wikisql(output_file, debugging_file, tokenizer):
     return num_examples_created, num_examples_failed
 
 
-def process_michigan_datasets(output_file, debugging_file, tokenizer):
+def process_michigan_datasets(
+    output_file, debugging_file, tokenizer
+) -> Tuple[int, int]:
     """Loads, converts, and writes Michigan examples to the standard format."""
     # TODO(alanesuhr,petershaw): Support asql for this dataset.
-    if FLAGS.generate_sql and FLAGS.abstract_sql:
-        raise NotImplementedError("Abstract SQL currently only supported for SPIDER.")
+    # if FLAGS.generate_sql and FLAGS.abstract_sql:
+    #     raise NotImplementedError("Abstract SQL currently only supported for SPIDER.")
 
-    schema_csv = os.path.join(FLAGS.input_filepath, FLAGS.dataset_name + "_schema.csv")
-    data_filepath = os.path.join(FLAGS.input_filepath, FLAGS.dataset_name + ".json")
+    schema_csv: str = os.path.join(
+        FLAGS.input_filepath, FLAGS.dataset_name + "_schema.csv"
+    )
+    data_filepath: str = os.path.join(
+        FLAGS.input_filepath, FLAGS.dataset_name + ".json"
+    )
 
     # Don't actually provide table entities.
     num_examples_created = 0
     num_examples_failed = 0
 
     print("Loading from " + data_filepath)
-    paired_data = get_nl_sql_pairs(data_filepath, set(FLAGS.splits))
+    paired_data = get_nl_sql_pairs(data_filepath, frozenset(FLAGS.splits))
     print("Loaded %d examples." % len(paired_data))
 
     schema = read_schema(schema_csv)
 
     for nl, sql in paired_data:
-        example = convert_michigan(nl, sql, schema, tokenizer, FLAGS.generate_sql)
+        example = convert_michigan(
+            nl,
+            sql,
+            schema,
+            tokenizer,
+            FLAGS.generate_sql,
+            FLAGS.anonymize_values,
+            FLAGS.abstract_sql,
+            abstract_sql_converters.michigan_db_to_table_tuples(schema),
+            FLAGS.allow_value_generation,
+        )
         if example is not None:
             output_file.write(json.dumps(example.to_json()) + "\n")
             num_examples_created += 1
@@ -222,7 +237,7 @@ def main(unused_argv):
     )
 
     # The debugging file saves all of the processed SQL queries.
-    debugging_file = gfile.Open(
+    debugging_file = open(
         os.path.join(
             "/".join(FLAGS.output_filepath.split("/")[:-1]),
             FLAGS.dataset_name + "_".join(FLAGS.splits) + "_gold.txt",
@@ -232,7 +247,7 @@ def main(unused_argv):
 
     # The output file will save a sequence of string-serialized JSON objects, one
     # line per object.
-    output_file = gfile.Open(os.path.join(FLAGS.output_filepath), "w")
+    output_file = open(os.path.join(FLAGS.output_filepath), "w")
 
     if FLAGS.dataset_name.lower() == "spider":
         num_examples_created, num_examples_failed = process_spider(

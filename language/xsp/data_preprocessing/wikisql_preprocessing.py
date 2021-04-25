@@ -17,9 +17,9 @@
 from __future__ import absolute_import, division, print_function
 
 import json
+from typing import Any, Optional, Tuple, Union, cast
 
 import sqlparse
-import tensorflow.compat.v1.gfile as gfile
 
 from language.xsp.data_preprocessing import abstract_sql, abstract_sql_converters
 from language.xsp.data_preprocessing.nl_to_sql_example import (
@@ -52,22 +52,32 @@ def normalize_entities(entity_name):
 
 
 def convert_wikisql(
-    input_example,
+    input_example: Union[Tuple[str, str], Tuple[str, str, Any]],
     schema,
     tokenizer,
-    generate_sql,
-    anonymize_values,
-    use_abstract_sql,
+    generate_sql: bool,
+    anonymize_values: bool,
+    use_abstract_sql: bool,
     tables_schema=None,
     allow_value_generation=False,
-):
-    """Converts a WikiSQL example into a NLToSQLExample."""
-    example = NLToSQLExample()
+) -> Optional[NLToSQLExample]:
+    """
+    Converts a WikiSQL example into a NLToSQLExample.
+    """
+
+    if len(input_example) == 2:
+        # https://github.com/python/mypy/issues/1178
+        nl_str, sql_str = cast(Tuple[str, str], input_example)
+    else:
+        nl_str, sql_str, _ = cast(Tuple[str, str, Any], input_example)
+
+    example = NLToSQLExample.empty(nl_str)
 
     try:
         try:
-            example = populate_utterance(example, input_example[0], schema, tokenizer)
+            populate_utterance(example, schema, tokenizer)
         except ValueError as e:
+            print("Couldn't populate utterance in wikisql example:")
             print(e)
             return None
 
@@ -92,7 +102,8 @@ def convert_wikisql(
 
         try:
             sql = preprocess_sql(sql)
-        except UnicodeDecodeError as e:
+        except UnicodeDecodeError:
+            print("Couldn't preprocess sql in wikisql example:")
             return None
 
         sql = sql.lower()
@@ -117,7 +128,7 @@ def convert_wikisql(
                 IndexError,
                 abstract_sql.ParseError,
                 abstract_sql.UnsupportedSqlError,
-            ) as e:
+            ):
                 return None
 
         if not successful_copy and not allow_value_generation:
@@ -138,7 +149,7 @@ def convert_wikisql(
 def load_wikisql_tables(filepath):
     """Loads the WikiSQL tables from a path and reformats as the format."""
     dbs = dict()
-    with gfile.Open(filepath) as infile:
+    with open(filepath) as infile:
         tables = [json.loads(line) for line in infile if line]
 
     for table in tables:

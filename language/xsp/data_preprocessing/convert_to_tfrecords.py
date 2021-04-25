@@ -21,12 +21,18 @@ import collections
 import json
 import os
 import random
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 import apache_beam as beam
 import tensorflow.compat.v1 as tf
 from absl import app, flags
+from tqdm import tqdm
 
-from language.xsp.data_preprocessing.nl_to_sql_example import NLToSQLExample
+from language.xsp.data_preprocessing.nl_to_sql_example import (
+    NLToSQLExample,
+    NLToSQLInput,
+)
+from language.xsp.data_preprocessing.schema_utils import DatabaseTable, TableColumn
 from language.xsp.model.model_config import load_config
 
 FLAGS = flags.FLAGS
@@ -72,26 +78,24 @@ COL_TYPE_TO_TOK = {
 }
 
 
-class InputToken(
-    collections.namedtuple(
-        "InputToken",
-        [
-            "wordpiece",
-            "index",
-            "copy_mask",
-            "segment_id",
-            "indicates_foreign_key",
-            "aligned",
-        ],
-    )
-):
-    pass
+InputToken = NamedTuple(
+    "InputToken",
+    [
+        ("wordpiece", str),
+        ("index", Optional[int]),
+        ("copy_mask", int),
+        ("segment_id", int),
+        ("indicates_foreign_key", int),
+        ("aligned", int),
+    ],
+)
 
+TableMap = List[Tuple[int, DatabaseTable]]
+ColumnMap = List[Tuple[int, TableColumn]]
 
-class OutputAction(
-    collections.namedtuple("OutputAction", ["wordpiece", "action_id", "type"])
-):
-    pass
+OutputAction = NamedTuple(
+    "OutputAction", [("wordpiece", str), ("action_id", Any), ("type", Any)]
+)
 
 
 def add_context(key):
@@ -115,19 +119,30 @@ def add_context(key):
 class ConvertToSequenceExampleDoFn(beam.DoFn):
     """DoFn for converting from NLToSQLExample to a TFRecord."""
 
+    num_repeats: int
+    table_cache: Dict
+    generate_output: bool
+    permute: bool
+    input_vocabulary: List[str]
+    output_vocabulary: List[str]
+
     def __init__(
         self,
         model_config,
-        generate_output,
-        permute,
-        num_repeats,
+        generate_output: bool,
+        permute: bool,
+        num_repeats: int,
         *unused_args,
-        **unused_kwargs
+        **unused_kwargs,
     ):
         self.model_config = model_config
 
-        self.input_vocabulary = None
-        self.output_vocabulary = None
+        with open(self.model_config.data_options.bert_vocab_path) as infile:
+            self.input_vocabulary = [line.rstrip("\n") for line in infile.readlines()]
+        with open(FLAGS.output_vocab) as infile:
+            self.output_vocabulary = [
+                line.replace("\n", "", 1) for line in infile.readlines()
+            ]
         self.permute = permute
         self.num_repeats = num_repeats
 
@@ -138,51 +153,35 @@ class ConvertToSequenceExampleDoFn(beam.DoFn):
         # equivalent
         # (NOTE: this assumes there's no randomness in the order of the tables,
         # cols, etc.)
-        self.table_cache = dict()
+        self.table_cache = {}
 
         self.generate_output = generate_output
 
-    def non_parallel_process(self, example):
-        # Load cache
-        if not self.input_vocabulary:
-            with tf.gfile.Open(
-                self.model_config.data_options.bert_vocab_path
-            ) as infile:
-                self.input_vocabulary = [
-                    line.rstrip("\n") for line in infile.readlines()
-                ]
-
-        if not self.output_vocabulary:
-            with tf.gfile.Open(FLAGS.output_vocab) as infile:
-                self.output_vocabulary = [
-                    line.replace("\n", "", 1) for line in infile.readlines()
-                ]
-
-        results = list()
+    def non_parallel_process(self, example) -> Optional[List]:
+        results = []
         for _ in range(self.num_repeats):
             # Convert the input to an indexed sequence
             input_conversion = self._convert_input_to_indexed_sequence(
-                example.model_input, random_permutation=self.permute
+                example.model_input
             )
             if input_conversion is None:
                 return None
 
-            # input_tokens stores the raw wordpieces, its index in the vocabulary, and
-            # whether it is copiable
-
-            # The maps store tuples of table or column entities paired with their head
-            # index in input_tokens
+            # input_tokens stores the raw wordpieces, its index in the vocabulary, and whether it is copiable
+            # The maps store tuples of table or column entities paired with their head index in input_tokens
             input_tokens, table_index_map, column_index_map, base_idx = input_conversion
 
             # Convert the output to an indexed sequence
-            output_actions = list()
+            output_actions = []
             if self.generate_output:
-                output_actions = self._convert_output_to_indexed_sequence(
+                possible_output_actions = self._convert_output_to_indexed_sequence(
                     example, table_index_map, column_index_map, base_idx
                 )
 
-                if output_actions is None:
+                if possible_output_actions is None:
                     return None
+
+                output_actions = possible_output_actions
 
                 raw_input_wordpieces = [
                     input_token.wordpiece for input_token in input_tokens
@@ -227,7 +226,9 @@ class ConvertToSequenceExampleDoFn(beam.DoFn):
             for result in results:
                 yield result
 
-    def _convert_input_to_sequence_example(self, input_tokens, features):
+    def _convert_input_to_sequence_example(
+        self, input_tokens, features: Dict[str, Any]
+    ) -> None:
         features["source_wordpieces"] = tf.train.FeatureList(
             feature=[
                 tf.train.Feature(
@@ -287,7 +288,9 @@ class ConvertToSequenceExampleDoFn(beam.DoFn):
             ]
         )
 
-    def _convert_output_to_sequence_example(self, output_actions, features):
+    def _convert_output_to_sequence_example(
+        self, output_actions: List, features
+    ) -> None:
         features["target_action_ids"] = tf.train.FeatureList(
             feature=[
                 tf.train.Feature(
@@ -304,8 +307,10 @@ class ConvertToSequenceExampleDoFn(beam.DoFn):
             ]
         )
 
-    def _convert_to_sequence_example(self, input_tokens, output_actions, utterance):
-        features = collections.OrderedDict()
+    def _convert_to_sequence_example(
+        self, input_tokens, output_actions: List, utterance: str
+    ):
+        features: Dict[str, Any] = collections.OrderedDict()
         self._convert_input_to_sequence_example(input_tokens, features)
 
         self._convert_output_to_sequence_example(output_actions, features)
@@ -316,7 +321,7 @@ class ConvertToSequenceExampleDoFn(beam.DoFn):
             feature_lists=tf.train.FeatureLists(feature_list=features),
         )
 
-    def _get_vocab_index_or_unk(self, token, is_input=True):
+    def _get_vocab_index_or_unk(self, token: str, is_input=True) -> Optional[int]:
         # Note that this will return a 'Unicode equals warning' if the token is a
         # unicode-only token
         if is_input:
@@ -327,16 +332,97 @@ class ConvertToSequenceExampleDoFn(beam.DoFn):
             # Add 3 to this because there are 3 placeholder tokens in the output
             # vocabulary that will be used during train (PAD, BEG, and END).
             return self.output_vocabulary.index(token) + 3
-        print(
-            "Could not find token "
-            + token.encode("ascii", "ignore")
-            + " in output vocabulary."
-        )
+        print("Could not find token " + token + " in output vocabulary.")
+        return None
 
-    def _convert_input_to_indexed_sequence(self, model_input, random_permutation):
-        # Everything is tokenized, but need to combine the utterance with the
-        # schema.
-        converted_wordpiece_tokens = list()
+    def _calculate_token_suffix(
+        self, model_input: NLToSQLInput
+    ) -> Tuple[List[InputToken], TableMap, ColumnMap]:
+        # The input tokens contain the string to copy, rather than the wordpiece
+        # that's being embedded.
+        tokens_suffix: List[InputToken] = []
+        table_index_map = list()
+        column_index_map = list()
+
+        order = list(range(len(model_input.tables)))
+        if self.permute:
+            random.shuffle(order)
+
+        for table_segment_idx, table_idx in enumerate(order):
+            table = model_input.tables[table_idx]
+            table_index_map.append((len(tokens_suffix), table))
+            table_wordpieces_tokens = list()
+            for wordpiece in table.table_name_wordpieces:
+                table_wordpieces_tokens.append(
+                    InputToken(
+                        "",
+                        self._get_vocab_index_or_unk(wordpiece.wordpiece),
+                        0,
+                        table_segment_idx + 1,
+                        0,
+                        int(table.matches_to_utterance),
+                    )
+                )
+
+            tokens_suffix.extend(
+                [
+                    InputToken(
+                        table.original_table_name,
+                        self.input_vocabulary.index(TAB_TOK),
+                        1,
+                        table_segment_idx + 1,
+                        0,
+                        int(table.matches_to_utterance),
+                    )
+                ]
+                + table_wordpieces_tokens
+            )
+
+            col_order = list(range(len(table.table_columns)))
+            if self.permute:
+                random.shuffle(col_order)
+
+            # Add the column tokens for this table
+            for col_idx in col_order:
+                column = table.table_columns[col_idx]
+                column_index_map.append((len(tokens_suffix), column))
+                column_wordpiece_tokens = list()
+                for wordpiece in column.column_name_wordpieces:
+                    column_wordpiece_tokens.append(
+                        InputToken(
+                            "",
+                            self._get_vocab_index_or_unk(wordpiece.wordpiece),
+                            0,
+                            table_segment_idx + 1,
+                            int(column.is_foreign_key),
+                            int(column.matches_to_utterance),
+                        )
+                    )
+
+                tokens_suffix.extend(
+                    [
+                        InputToken(
+                            column.original_column_name,
+                            self.input_vocabulary.index(
+                                COL_TYPE_TO_TOK[column.column_type]
+                            ),
+                            1,
+                            table_segment_idx + 1,
+                            int(column.is_foreign_key),
+                            int(column.matches_to_utterance),
+                        )
+                    ]
+                    + column_wordpiece_tokens
+                )
+
+        return tokens_suffix, table_index_map, column_index_map
+
+    def _convert_input_to_indexed_sequence(
+        self, model_input: NLToSQLInput
+    ) -> Optional[Tuple[List[InputToken], TableMap, ColumnMap, int]]:
+        # Everything is tokenized, but need to combine the utterance with the schema.
+        converted_wordpiece_tokens = []
+
         for wordpiece in model_input.utterance_wordpieces:
             converted_wordpiece_tokens.append(
                 InputToken(
@@ -358,93 +444,21 @@ class ConvertToSequenceExampleDoFn(beam.DoFn):
             + [InputToken(SEP_TOK, self.input_vocabulary.index(SEP_TOK), 0, 0, 0, 0)]
         )
 
-        table_index_map = list()
-        column_index_map = list()
-
         # Add the table tokens
         # Look it up in the cache
         string_serial = ",".join([str(table) for table in model_input.tables])
-        if string_serial in self.table_cache and not random_permutation:
+        if string_serial in self.table_cache and not self.permute:
             tokens_suffix, table_index_map, column_index_map = self.table_cache[
                 string_serial
             ]
         else:
-            # The input tokens contain the string to copy, rather than the wordpiece
-            # that's being embedded.
-            tokens_suffix = list()
-
-            order = list(range(len(model_input.tables)))
-            if random_permutation:
-                random.shuffle(order)
-
-            for table_segment_idx, table_idx in enumerate(order):
-                table = model_input.tables[table_idx]
-                table_index_map.append((len(tokens_suffix), table))
-                table_wordpieces_tokens = list()
-                for wordpiece in table.table_name_wordpieces:
-                    table_wordpieces_tokens.append(
-                        InputToken(
-                            "",
-                            self._get_vocab_index_or_unk(wordpiece.wordpiece),
-                            0,
-                            table_segment_idx + 1,
-                            0,
-                            int(table.matches_to_utterance),
-                        )
-                    )
-
-                tokens_suffix.extend(
-                    [
-                        InputToken(
-                            table.original_table_name,
-                            self.input_vocabulary.index(TAB_TOK),
-                            1,
-                            table_segment_idx + 1,
-                            0,
-                            int(table.matches_to_utterance),
-                        )
-                    ]
-                    + table_wordpieces_tokens
-                )
-
-                col_order = list(range(len(table.table_columns)))
-                if random_permutation:
-                    random.shuffle(col_order)
-
-                # Add the column tokens for this table
-                for col_idx in col_order:
-                    column = table.table_columns[col_idx]
-                    column_index_map.append((len(tokens_suffix), column))
-                    column_wordpiece_tokens = list()
-                    for wordpiece in column.column_name_wordpieces:
-                        column_wordpiece_tokens.append(
-                            InputToken(
-                                "",
-                                self._get_vocab_index_or_unk(wordpiece.wordpiece),
-                                0,
-                                table_segment_idx + 1,
-                                int(column.is_foreign_key),
-                                int(column.matches_to_utterance),
-                            )
-                        )
-
-                    tokens_suffix.extend(
-                        [
-                            InputToken(
-                                column.original_column_name,
-                                self.input_vocabulary.index(
-                                    COL_TYPE_TO_TOK[column.column_type]
-                                ),
-                                1,
-                                table_segment_idx + 1,
-                                int(column.is_foreign_key),
-                                int(column.matches_to_utterance),
-                            )
-                        ]
-                        + column_wordpiece_tokens
-                    )
+            (
+                tokens_suffix,
+                table_index_map,
+                column_index_map,
+            ) = self._calculate_token_suffix(model_input)
             # Update cache
-            if not random_permutation:
+            if not self.permute:
                 self.table_cache[string_serial] = (
                     tokens_suffix,
                     table_index_map,
@@ -461,16 +475,23 @@ class ConvertToSequenceExampleDoFn(beam.DoFn):
         return tokens, table_index_map, column_index_map, base_idx
 
     def _convert_output_to_indexed_sequence(
-        self, example, table_index_map, column_index_map, base_idx
-    ):
-        action_sequence = list()
+        self,
+        example: NLToSQLExample,
+        table_index_map: TableMap,
+        column_index_map: ColumnMap,
+        base_idx: int,
+    ) -> Optional[List[OutputAction]]:
+        action_sequence = []
 
-        gold_query = example.gold_sql_query
-
-        if len(gold_query.actions) > self.model_config.data_options.max_decode_length:
+        if (
+            len(example.gold_sql_query.actions)
+            > self.model_config.data_options.max_decode_length
+        ):
+            print(f"Decoded sequence too long: {len(example.gold_sql_query.actions)}")
+            # breakpoint()
             return None
 
-        for action in gold_query.actions:
+        for action in example.gold_sql_query.actions:
             if action.symbol:
                 action_sequence.append(
                     OutputAction(
@@ -484,8 +505,11 @@ class ConvertToSequenceExampleDoFn(beam.DoFn):
                 if action.entity_copy.copied_table:
                     # Copied a table.
                     table = action.entity_copy.copied_table
-                    for index, entity in table_index_map:
-                        if entity.original_table_name == table.original_table_name:
+                    for index, table_entity in table_index_map:
+                        if (
+                            table_entity.original_table_name
+                            == table.original_table_name
+                        ):
                             action_sequence.append(
                                 OutputAction(
                                     table.original_table_name,
@@ -498,10 +522,11 @@ class ConvertToSequenceExampleDoFn(beam.DoFn):
                 else:
                     # Copied a column.
                     column = action.entity_copy.copied_column
-                    for index, entity in column_index_map:
+                    for index, col_entity in column_index_map:
                         if (
-                            entity.original_column_name == column.original_column_name
-                            and entity.table_name == column.table_name
+                            col_entity.original_column_name
+                            == column.original_column_name
+                            and col_entity.table_name == column.table_name
                         ):
                             action_sequence.append(
                                 OutputAction(
@@ -530,7 +555,7 @@ class ConvertToSequenceExampleDoFn(beam.DoFn):
         return action_sequence
 
 
-def creation_wrapper(process_dataset_fn):
+def creation_wrapper(process_dataset_fn) -> None:
     """Wrapper for creating the TFRecords files."""
     # Create the tf examples directory.
     if not tf.gfile.IsDirectory(FLAGS.tf_examples_dir):
@@ -549,11 +574,11 @@ def creation_wrapper(process_dataset_fn):
             FLAGS.tf_examples_dir, filename.split("/")[-1].split(".")[0] + ".tfrecords"
         )
 
-        permute = "spider_train" in output_path and FLAGS.permute
+        permute = FLAGS.permute
         num_repeats = FLAGS.num_spider_repeats if permute else 1
 
         print(
-            "Processing %s. Permute: %r with %d repetitions"
+            "Processing %s. Permute: %r with %d repetition(s)"
             % (filename, permute, num_repeats)
         )
         print("Writing to " + output_path)
@@ -561,19 +586,23 @@ def creation_wrapper(process_dataset_fn):
         process_dataset_fn(input_path, model_config, permute, num_repeats, output_path)
 
 
-def process_dataset(input_path, model_config, permute, num_repeats, output_path):
+def process_dataset(
+    input_path: str, model_config, permute, num_repeats, output_path
+) -> None:
     """Function that processes a dataset without multiprocessing."""
     fn = ConvertToSequenceExampleDoFn(
         model_config, FLAGS.generate_output, permute=permute, num_repeats=num_repeats
     )
 
-    with tf.gfile.Open(input_path) as infile:
-        examples = [NLToSQLExample().from_json(json.loads(line)) for line in infile]
+    with open(input_path) as infile:
+        examples = [NLToSQLExample.from_json(json.loads(line)) for line in tqdm(infile)]
+
+    print("Loaded examples from .json")
 
     with tf.python_io.TFRecordWriter(output_path) as writer:
         num_examples_written = 0
         total_examples = 0
-        for example in examples:
+        for example in tqdm(examples):
             total_examples += 1
             converteds = fn.non_parallel_process(example)
             if converteds:

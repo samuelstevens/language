@@ -16,89 +16,99 @@
 
 from __future__ import absolute_import, division, print_function
 
+import dataclasses
 import json
+from typing import Any, Dict, List, NewType, Set
+
+from typing_extensions import TypedDict
 
 from language.xsp.data_preprocessing.language_utils import Wordpiece, get_wordpieces
 
 ACCEPTABLE_COL_TYPES = {"text", "number", "others", "time", "boolean"}
 
+Column = TypedDict(
+    "Column",
+    {"field name": str, "is primary key": bool, "is foreign key": bool, "type": str},
+)
 
-class TableColumn(object):
+TableName = NewType("TableName", str)
+Schema = Dict[TableName, List[Column]]
+
+
+@dataclasses.dataclass
+class TableColumn:
     """Contains information about column in a database table."""
 
-    def __init__(self):
-        self.original_column_name = None
-        self.column_name_wordpieces = list()
-        self.column_type = None
-        self.table_name = None
-        self.is_foreign_key = None
-        self.matches_to_utterance = None
+    column_type: str
+    original_column_name: str
+    column_name_wordpieces: List[Wordpiece]
+    table_name: str
+    is_foreign_key: bool
+    matches_to_utterance: Any
 
-    def to_json(self):
+    def to_json(self) -> Dict[str, Any]:
         assert self.column_type in ACCEPTABLE_COL_TYPES, (
             "Column type not " "recognized: %r; name: %r"
         ) % (self.column_type, self.original_column_name)
-        return {
-            "original_column_name": self.original_column_name,
-            "column_name_wordpieces": [
-                wordpiece.to_json() for wordpiece in self.column_name_wordpieces
-            ],
-            "column_type": self.column_type,
-            "table_name": self.table_name,
-            "is_foreign_key": self.is_foreign_key,
-            "matches_to_utterance": self.matches_to_utterance,
-        }
+        return dataclasses.asdict(self)
 
-    def from_json(self, dictionary):
+    @staticmethod
+    def from_json(dictionary) -> "TableColumn":
         """Sets the properties of the column from a dictionary representation."""
-        self.original_column_name = dictionary["original_column_name"]
-        self.column_name_wordpieces = [
-            Wordpiece().from_json(wordpiece)
+        original_column_name = dictionary["original_column_name"]
+        column_name_wordpieces = [
+            Wordpiece.from_json(wordpiece)
             for wordpiece in dictionary["column_name_wordpieces"]
         ]
-        self.column_type = dictionary["column_type"]
-        self.table_name = dictionary["table_name"]
-        self.is_foreign_key = dictionary["is_foreign_key"]
-        self.matches_to_utterance = dictionary["matches_to_utterance"]
-        assert self.column_type in ACCEPTABLE_COL_TYPES, (
+        column_type = dictionary["column_type"]
+        table_name = dictionary["table_name"]
+        is_foreign_key = dictionary["is_foreign_key"]
+        matches_to_utterance = dictionary["matches_to_utterance"]
+        assert column_type in ACCEPTABLE_COL_TYPES, (
             "Column type not " "recognized: %r; name: %r"
-        ) % (self.column_type, self.original_column_name)
+        ) % (column_type, original_column_name)
 
-        return self
+        return TableColumn(
+            column_type,
+            original_column_name,
+            column_name_wordpieces,
+            table_name,
+            is_foreign_key,
+            matches_to_utterance,
+        )
 
 
-class DatabaseTable(object):
+@dataclasses.dataclass
+class DatabaseTable:
     """Contains information about a table in a database."""
 
-    def __init__(self):
-        self.original_table_name = None
-        self.table_name_wordpieces = list()
-        self.table_columns = list()
-        self.matches_to_utterance = None
+    original_table_name: str
+    table_name_wordpieces: List[Wordpiece]
+    table_columns: List[TableColumn]
+    matches_to_utterance: Any
 
     def to_json(self):
-        return {
-            "original_table_name": self.original_table_name,
-            "table_name_wordpieces": [
-                wordpiece.to_json() for wordpiece in self.table_name_wordpieces
-            ],
-            "table_columns": [column.to_json() for column in self.table_columns],
-            "matches_to_utterance": self.matches_to_utterance,
-        }
+        return dataclasses.asdict(self)
 
-    def from_json(self, dictionary):
+    @staticmethod
+    def from_json(dictionary) -> "DatabaseTable":
         """Converts from a JSON dictionary to a DatabaseTable object."""
-        self.original_table_name = dictionary["original_table_name"]
-        self.table_name_wordpieces = [
-            Wordpiece().from_json(wordpiece)
+        original_table_name = dictionary["original_table_name"]
+        table_name_wordpieces = [
+            Wordpiece.from_json(wordpiece)
             for wordpiece in dictionary["table_name_wordpieces"]
         ]
-        self.table_columns = [
-            TableColumn().from_json(column) for column in dictionary["table_columns"]
+        table_columns = [
+            TableColumn.from_json(column) for column in dictionary["table_columns"]
         ]
-        self.matches_to_utterance = dictionary["matches_to_utterance"]
+        matches_to_utterance = dictionary["matches_to_utterance"]
 
-        return self
+        return DatabaseTable(
+            original_table_name,
+            table_name_wordpieces,
+            table_columns,
+            matches_to_utterance,
+        )
 
     def __str__(self):
         return json.dumps(self.to_json())
@@ -135,17 +145,16 @@ def column_is_foreign_key(column):
     return foreign_key
 
 
-def process_columns(columns, tokenizer, table_name, aligned_schema_entities):
+def process_columns(
+    columns, tokenizer, table_name, aligned_schema_entities
+) -> List[TableColumn]:
     """Processes a column in a table to a TableColumn object."""
     column_obj_list = list()
     for column in columns:
-        column_obj = TableColumn()
-        column_obj.original_column_name = column["field name"]
-        column_obj.column_name_wordpieces.extend(
-            get_wordpieces(
-                column_obj.original_column_name.replace("_", " "), tokenizer
-            )[0]
-        )
+        original_column_name = column["field name"]
+        column_name_wordpieces = get_wordpieces(
+            original_column_name.replace("_", " "), tokenizer
+        )[0]
         col_type = column["type"].lower()
         if (
             "int" in col_type
@@ -156,41 +165,48 @@ def process_columns(columns, tokenizer, table_name, aligned_schema_entities):
             col_type = "number"
         if "varchar" in col_type or "longtext" in col_type:
             col_type = "text"
-        column_obj.column_type = col_type
-        column_obj.table_name = table_name
+        column_type = col_type
+        table_name = table_name
 
-        column_obj.matches_to_utterance = (
-            column_obj.original_column_name.lower().replace("_", " ")
-            in aligned_schema_entities
+        matches_to_utterance = (
+            original_column_name.lower().replace("_", " ") in aligned_schema_entities
         )
 
-        column_obj.is_foreign_key = column_is_foreign_key(column)
-        column_obj_list.append(column_obj)
+        is_foreign_key = column_is_foreign_key(column)
+
+        column_obj_list.append(
+            TableColumn(
+                column_type,
+                original_column_name,
+                column_name_wordpieces,
+                table_name,
+                is_foreign_key,
+                matches_to_utterance,
+            )
+        )
     return column_obj_list
 
 
-def process_table(table_name, columns, tokenizer, aligned_schema_entities):
+def process_table(
+    table_name, columns, tokenizer, aligned_schema_entities
+) -> DatabaseTable:
     """Processes a schema table into a DatabaseTable object."""
-    table_obj = DatabaseTable()
-    table_obj.original_table_name = table_name
+    original_table_name = table_name
 
-    table_obj.matches_to_utterance = (
-        table_obj.original_table_name.lower().replace("_", " ")
-        in aligned_schema_entities
+    matches_to_utterance = (
+        original_table_name.lower().replace("_", " ") in aligned_schema_entities
     )
 
     # Name wordpieces. Remove underscores then tokenize.
-    table_obj.table_name_wordpieces.extend(
-        get_wordpieces(table_name.replace("_", " "), tokenizer)[0]
+    table_name_wordpieces = get_wordpieces(table_name.replace("_", " "), tokenizer)[0]
+
+    table_columns = process_columns(
+        columns, tokenizer, original_table_name, aligned_schema_entities
     )
 
-    table_obj.table_columns.extend(
-        process_columns(
-            columns, tokenizer, table_obj.original_table_name, aligned_schema_entities
-        )
+    return DatabaseTable(
+        original_table_name, table_name_wordpieces, table_columns, matches_to_utterance
     )
-
-    return table_obj
 
 
 def process_tables(schema, tokenizer, aligned_schema_entities):
@@ -201,8 +217,10 @@ def process_tables(schema, tokenizer, aligned_schema_entities):
     ]
 
 
-def get_schema_entities(schema):
-    """Gets the schema entities (column and table names) for a schema."""
+def get_schema_entities(schema: Schema) -> Set[str]:
+    """
+    Gets the schema entities (column and table names) for a schema.
+    """
     names = set()
     for table_name, cols in schema.items():
         names.add(table_name.lower().replace("_", " "))

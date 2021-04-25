@@ -1,147 +1,116 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+set -x
 
-EXPERIMENT_DIR=${EXPERIMENT_DIR:-"xsp_experiment_run"}
+# strip trailing slashes
+EXPERIMENT_DIR=$(realpath --canonicalize-missing ${EXPERIMENT_DIR})
+
 DATA_DIR=${DATA_DIR:-"data"}
 OUTPUT_VOCAB_FILE=${OUTPUT_VOCAB_FILE:-"${EXPERIMENT_DIR}/assets/output_vocab.txt"}
 
-# 1. Convert raw data to JSON
-function raw_to_json {
-    # atis dev
+function raw_to_eval_json {
     python -m language.xsp.data_preprocessing.convert_to_examples \
-        --dataset_name=atis \
-        --input_filepath=${DATA_DIR}/atis/ \
-        --splits=dev \
-        --output_filepath=${EXPERIMENT_DIR}/examples/atis_dev.json \
+        --dataset_name=${1} \
+        --input_filepath=${DATA_DIR}/${1}/ \
+        --splits=${2} \
+        --output_filepath=${EXPERIMENT_DIR}/examples/${1}_${3}.json \
         --tokenizer_vocabulary=${EXPERIMENT_DIR}/assets/input_bert_vocabulary.txt
+}
 
-    # geoquery dev
+function raw_to_training_json {
     python -m language.xsp.data_preprocessing.convert_to_examples \
-        --dataset_name=geoquery \
-        --input_filepath=${DATA_DIR}/geoquery/ \
-        --splits=dev \
-        --output_filepath=${EXPERIMENT_DIR}/examples/geoquery_dev.json \
-        --tokenizer_vocabulary=${EXPERIMENT_DIR}/assets/input_bert_vocabulary.txt
-
-    # advising dev
-    # echo "Skipping advising dataset for now"
-    python -m language.xsp.data_preprocessing.convert_to_examples \
-        --dataset_name=advising \
-        --input_filepath=${DATA_DIR}/advising/ \
-        --splits=dev \
-        --output_filepath=${EXPERIMENT_DIR}/examples/advising_dev.json \
-        --tokenizer_vocabulary=${EXPERIMENT_DIR}/assets/input_bert_vocabulary.txt
-
-    # scholar dev
-    python -m language.xsp.data_preprocessing.convert_to_examples \
-        --dataset_name=scholar \
-        --input_filepath=${DATA_DIR}/scholar/ \
-        --splits=dev \
-        --output_filepath=${EXPERIMENT_DIR}/examples/scholar_dev.json \
-        --tokenizer_vocabulary=${EXPERIMENT_DIR}/assets/input_bert_vocabulary.txt
-
-    # restaurants all folds
-    python -m language.xsp.data_preprocessing.convert_to_examples \
-        --dataset_name=restaurants \
-        --input_filepath=${DATA_DIR}/restaurants/ \
-        --splits=0,1,2,3,4,5,6,7,8,9 \
-        --output_filepath=${EXPERIMENT_DIR}/examples/restaurants_dev.json \
-        --tokenizer_vocabulary=${EXPERIMENT_DIR}/assets/input_bert_vocabulary.txt
-
-    # imdb all folds
-    python -m language.xsp.data_preprocessing.convert_to_examples \
-        --dataset_name=imdb \
-        --input_filepath=${DATA_DIR}/imdb/ \
-        --splits=0,1,2,3,4,5,6,7,8,9 \
-        --output_filepath=${EXPERIMENT_DIR}/examples/imdb_dev.json \
-        --tokenizer_vocabulary=${EXPERIMENT_DIR}/assets/input_bert_vocabulary.txt
-
-    # academic all folds
-    python -m language.xsp.data_preprocessing.convert_to_examples \
-        --dataset_name=academic \
-        --input_filepath=${DATA_DIR}/academic/ \
-        --splits=0,1,2,3,4,5,6,7,8,9 \
-        --output_filepath=${EXPERIMENT_DIR}/examples/academic_dev.json \
-        --tokenizer_vocabulary=${EXPERIMENT_DIR}/assets/input_bert_vocabulary.txt
-
-    # yelp all folds
-    python -m language.xsp.data_preprocessing.convert_to_examples \
-        --dataset_name=yelp \
-        --input_filepath=${DATA_DIR}/yelp/ \
-        --splits=0,1,2,3,4,5,6,7,8,9 \
-        --output_filepath=${EXPERIMENT_DIR}/examples/yelp_dev.json \
-        --tokenizer_vocabulary=${EXPERIMENT_DIR}/assets/input_bert_vocabulary.txt
-
-    # spider training
-    python -m language.xsp.data_preprocessing.convert_to_examples \
-        --dataset_name=spider \
-        --input_filepath=${DATA_DIR}/spider/ \
-        --splits=train \
-        --output_filepath=${EXPERIMENT_DIR}/examples/spider_train.json \
+        --dataset_name=${1} \
+        --input_filepath=${DATA_DIR}/${1}/ \
+        --splits=${2} \
+        --output_filepath=${EXPERIMENT_DIR}/examples/${1}_${3}.json \
         --generate_sql=True \
-        --tokenizer_vocabulary=${EXPERIMENT_DIR}/assets/input_bert_vocabulary.txt
+        --tokenizer_vocabulary=${EXPERIMENT_DIR}/assets/input_bert_vocabulary.txt \
+        --abstract_sql=${4}
+}
 
-    # wikisql training
-    python -m language.xsp.data_preprocessing.convert_to_examples \
-        --dataset_name=wikisql \
-        --input_filepath=${DATA_DIR}/wikisql/ \
-        --splits=train \
-        --output_filepath=${EXPERIMENT_DIR}/examples/wikisql_train.json \
-        --generate_sql=True \
-        --tokenizer_vocabulary=${EXPERIMENT_DIR}/assets/input_bert_vocabulary.txt
-
-    # spider dev
-    python -m language.xsp.data_preprocessing.convert_to_examples \
-        --dataset_name=spider \
-        --input_filepath=${DATA_DIR}/spider/ \
-        --splits=dev \
-        --output_filepath=${EXPERIMENT_DIR}/examples/spider_dev.json \
-        --tokenizer_vocabulary=${EXPERIMENT_DIR}/assets/input_bert_vocabulary.txt
+function join_by_char {
+    # https://dev.to/meleu/how-to-join-array-elements-in-a-bash-script-303a
+    local IFS="$1"
+    shift
+    echo "$*"
 }
 
 function output_vocab {
+    input_filenames=()
+    for dataset in $@; do
+        input_filenames+=(${dataset}_train.json)
+    done
+    input_filenames=$(join_by_char , ${input_filenames})
     # 2. Create output vocabulary from training data
     python -m language.xsp.data_preprocessing.create_vocabularies \
         --data_dir=${EXPERIMENT_DIR}/examples/ \
-        --input_filenames=spider_train.json,wikisql_train.json \
+        --input_filenames=${input_filenames} \
         --output_path=${OUTPUT_VOCAB_FILE}
 }
 
-function json_to_tfrecords {
-    # 3. Convert to TFRecords
-
-    # xsp dev
-    echo "Add advising_dev.json when it's fixed"
+function json_to_eval_tf_records {
     python -m language.xsp.data_preprocessing.convert_to_tfrecords \
         --examples_dir=${EXPERIMENT_DIR}/examples/ \
-        --filenames=atis_dev.json,academic_dev.json,imdb_dev.json,geoquery_dev.json,scholar_dev.json,restaurants_dev.json,yelp_dev.json \
+        --filenames=${1}_${2}.json \
         --output_vocab=${OUTPUT_VOCAB_FILE} \
         --permute=False \
         --config=${EXPERIMENT_DIR}/model/model_config.json \
         --tf_examples_dir=${EXPERIMENT_DIR}/tf_records
 
+}
+
+function json_to_training_tf_records {
     # training data (spider and wikisql)
     python -m language.xsp.data_preprocessing.convert_to_tfrecords \
         --examples_dir=${EXPERIMENT_DIR}/examples/ \
-        --filenames=spider_train.json,wikisql_train.json \
+        --filenames=${1}_${2}.json \
         --output_vocab=${OUTPUT_VOCAB_FILE} \
         --generate_output=True \
         --permute=True \
         --num_spider_repeats=7 \
         --config=${EXPERIMENT_DIR}/model/model_config.json \
         --tf_examples_dir=${EXPERIMENT_DIR}/tf_records
-
-    # spider dev
-    python -m language.xsp.data_preprocessing.convert_to_tfrecords \
-        --examples_dir=${EXPERIMENT_DIR}/examples/ \
-        --filenames=spider_dev.json \
-        --output_vocab=${OUTPUT_VOCAB_FILE} \
-        --permute=False \
-        --config=${EXPERIMENT_DIR}/model/model_config.json \
-        --tf_examples_dir=${EXPERIMENT_DIR}/tf_records
 }
 
-raw_to_json
-output_vocab
-json_to_tfrecords
+# ssp dev sets
+# raw_to_eval_json atis dev dev
+# raw_to_eval_json geoquery dev dev
+# raw_to_eval_json scholar dev dev
+# raw_to_eval_json imdb "9" dev
+# raw_to_eval_json restaurants "9" dev
+# raw_to_eval_json yelp "0,1,2,3,4,5,6,7,8,9" dev
+# raw_to_eval_json academic "0,1,2,3,4,5,6,7,8,9" dev
+
+# # xsp training
+# raw_to_training_json wikisql train train False
+# raw_to_training_json spider train train False
+
+# raw_to_eval_json spider dev dev
+
+# ssp train sets
+# raw_to_training_json atis train train False
+# raw_to_training_json scholar train train False
+# raw_to_training_json geoquery train train False
+# raw_to_training_json restaurants "0,1,2,3,4,5,6,7,8" train False
+# raw_to_training_json imdb "0,1,2,3,4,5,6,7,8" train False
+
+# output_vocab imbd
+
+# json_to_eval_tf_records atis dev
+# json_to_eval_tf_records academic dev
+# json_to_eval_tf_records advising dev
+# json_to_eval_tf_records imdb dev
+# json_to_eval_tf_records geoquery dev
+# json_to_eval_tf_records scholar dev
+# json_to_eval_tf_records geoquery dev
+# json_to_eval_tf_records yelp dev
+
+# json_to_eval_tf_records spider dev
+
+# json_to_training_tf_records spider train
+# json_to_training_tf_records wikisql train
+# json_to_training_tf_records scholar train
+# json_to_training_tf_records geoquery train
+# json_to_training_tf_records atis train
+# json_to_training_tf_records imdb train

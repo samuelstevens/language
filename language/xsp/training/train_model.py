@@ -16,7 +16,6 @@
 
 from __future__ import absolute_import, division, print_function
 
-import operator
 import os
 import pathlib
 import random
@@ -85,6 +84,11 @@ flags.DEFINE_bool(
     True,
     "Whether to use oracle foreign keys when restoring from asql.",
 )
+flags.DEFINE_bool(
+    "use_empty_tables",
+    False,
+    "Whether to consider empty tables when calculating aggregate metrics",
+)
 
 # These flags are only required if using_abstract_sql is True.
 # TODO(samuelstevens): Better method for handling other datasets.
@@ -104,7 +108,7 @@ def checkpoints_to_delete(experiment: keepsake.experiment.Experiment) -> List[in
     best = experiment.best()
     latest = experiment.latest()
 
-    to_delete = []
+    to_delete: List[int] = []
 
     if not best or not latest:
         return to_delete
@@ -129,7 +133,7 @@ def delete_checkpoint(model_dir: Union[str, pathlib.Path], num: int) -> None:
     if isinstance(model_dir, str):
         model_dir = pathlib.Path(model_dir)
 
-    for checkpoint_file in pathlib.Path(model_dir).glob(f"ckpt-{num}*"):
+    for checkpoint_file in pathlib.Path(model_dir).glob(f"ckpt-{num}.*"):
         os.remove(checkpoint_file)
 
 
@@ -241,7 +245,7 @@ def main(unused_argv: Any) -> None:
             model_config.load_config(FLAGS.config),
         )
 
-        saver = tf.train.Saver(max_to_keep=KEEP_CHECKPOINTS_MAX)
+        saver = tf.train.Saver(max_to_keep=None)
 
         global_step = 0
         checkpoint = checkpoint_path(FLAGS.model_dir, global_step)
@@ -312,7 +316,9 @@ def main(unused_argv: Any) -> None:
                 update_cache=should_update_cache,
             )
 
-            metrics = official_evaluation.aggregate_metrics(results)
+            metrics = official_evaluation.aggregate_metrics(
+                results, FLAGS.use_empty_tables
+            )
             tf.logging.info(
                 "Validation Results:\n\tExecution F1: %s", metrics.execution_f1
             )
@@ -323,6 +329,7 @@ def main(unused_argv: Any) -> None:
                 metrics={
                     "train_loss": train_loss,
                     "eval_execution_f1": metrics.execution_f1,
+                    "eval_string_match": metrics.string_same,
                 },
                 primary_metric=("eval_execution_f1", "maximize"),
             )

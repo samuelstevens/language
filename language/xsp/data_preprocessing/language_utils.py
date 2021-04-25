@@ -16,48 +16,34 @@
 
 from __future__ import absolute_import, division, print_function
 
+import dataclasses
+from typing import Collection, List, Optional, Set, Tuple
 
-class Wordpiece(object):
+
+@dataclasses.dataclass
+class Wordpiece:
     """Contains wordpiece information as a substring of an utterance."""
 
-    def __init__(
-        self,
-        wordpiece=None,
-        tokenized_index=None,
-        span_start_index=None,
-        span_end_index=None,
-        matches_to_schema=None,
-    ):
-        self.wordpiece = wordpiece
-        self.tokenized_index = tokenized_index
-        self.span_start_index = span_start_index
-        self.span_end_index = span_end_index
-        self.matches_to_schema = matches_to_schema
+    wordpiece: str
+    tokenized_index: int
+    span_start_index: int
+    span_end_index: int
+    matches_to_schema: bool
 
     def to_json(self):
-        return {
-            "wordpiece": self.wordpiece,
-            "tokenized_index": self.tokenized_index,
-            "span_start_index": self.span_start_index,
-            "span_end_index": self.span_end_index,
-            "matches_to_schema": self.matches_to_schema,
-        }
+        return dataclasses.asdict(self)
 
-    def from_json(self, dictionary):
-        self.wordpiece = dictionary["wordpiece"]
-        self.tokenized_index = dictionary["tokenized_index"]
-        self.span_start_index = dictionary["span_start_index"]
-        self.span_end_index = dictionary["span_end_index"]
-        self.matches_to_schema = dictionary["matches_to_schema"]
-
-        return self
+    @staticmethod
+    def from_json(dictionary) -> "Wordpiece":
+        return Wordpiece(**dictionary)
 
 
-def get_wordpieces(sequence, tokenizer, schema_entities=None):
+def get_wordpieces(
+    sequence: str, tokenizer, schema_entities: Optional[Collection[str]] = None
+) -> Tuple[List[Wordpiece], Set[str]]:
     """Sets the wordpieces for a NLToSQLExample."""
-    # First, it finds exact-string alignment between schema entities and the
-    # utterance.
-    aligned_entities = set()
+    # First, it finds exact-string alignment between schema entities and the utterance.
+    aligned_entities: Set[str] = set()
     aligned_chars = [False for _ in range(len(sequence))]
     if schema_entities:
         for schema_entity in sorted(schema_entities, key=len, reverse=True):
@@ -69,7 +55,7 @@ def get_wordpieces(sequence, tokenizer, schema_entities=None):
                     aligned_chars[i] = True
 
     # Get the spans for the wordpieces
-    wordpieces = tokenizer.tokenize(sequence)
+    wordpieces: List[str] = tokenizer.tokenize(sequence)
 
     original_seq_index = 0
     wordpieces_with_spans = list()
@@ -115,7 +101,8 @@ def get_wordpieces(sequence, tokenizer, schema_entities=None):
                 aligned = True
                 break
 
-        wordpiece = Wordpiece(wordpiece, i, span_start, span_end, aligned)
-        wordpieces_with_spans.append(wordpiece)
+        wordpieces_with_spans.append(
+            Wordpiece(wordpiece, i, span_start, span_end, aligned)
+        )
 
     return wordpieces_with_spans, aligned_entities

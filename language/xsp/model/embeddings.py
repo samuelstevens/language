@@ -29,7 +29,7 @@ def _get_vocab_symbols(filename):
     vocab = []
     if not gfile.Exists(filename):
         raise ValueError("File does not exist: {}".format(filename))
-    with gfile.GFile(filename) as fp:
+    with open(filename) as fp:
         for line in fp:
             vocab.append(line.rstrip("\n"))
     return vocab

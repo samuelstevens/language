@@ -441,7 +441,7 @@ def write_results(results: Sequence[ExecutionResult], metrics: Metrics, ofile) -
         + "{0:.2f}".format(100.0 * metrics.precision)
         + " ; "
         + str(metrics.num_empty_pred)
-        + " nonempty predicted tables"
+        + " empty predicted tables"
         + "\n"
     )
     ofile.write(
@@ -449,7 +449,7 @@ def write_results(results: Sequence[ExecutionResult], metrics: Metrics, ofile) -
         + "{0:.2f}".format(100.0 * metrics.recall)
         + " ; "
         + str(metrics.num_empty_gold)
-        + " nonempty gold tables"
+        + " empty gold tables"
         + "\n"
     )
     ofile.write(
@@ -532,8 +532,8 @@ def aggregate_metrics(
 
     return Metrics(
         execution_f1=compute_f1(precision, recall),
-        num_empty_pred=len(precisions),
-        num_empty_gold=len(recalls),
+        num_empty_pred=len(results) - len(precisions),
+        num_empty_gold=len(results) - len(recalls),
         timeouts=timeouts / len(results) * 100,
         gold_error=gold_error / len(results) * 100,
         schema_errors=schema_errors / len(results) * 100,

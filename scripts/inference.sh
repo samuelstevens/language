@@ -5,7 +5,6 @@ set -euo pipefail
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} 
 
 DATA_DIR=${DATA_DIR:-"data"}
-EXPERIMENT_DIR=${EXPERIMENT_DIR:-"xsp_experiment_run"}
 OUTPUT_VOCAB_FILE=${OUTPUT_VOCAB_FILE:-"${EXPERIMENT_DIR}/assets/output_vocab.txt"}
 PREDICTIONS_DIR="${EXPERIMENT_DIR}/trial${TRIAL_NUM}_predictions"
 CHECKPOINT_PATH="${EXPERIMENT_DIR}/trial${TRIAL_NUM}/ckpt-${CHECKPOINT}"
@@ -30,18 +29,18 @@ function run_inference {
       --restored_sql_cache_filepath=${PREDICTIONS_DIR}/${1}_dev_restored_cache.json \
       --splits=${2} \
       --beam_size=1 \
-      --using_abstract_sql=True \
+      --using_abstract_sql=False \
       --spider_examples_json=${DATA_DIR}/spider/dev.json \
       --spider_tables_json=${DATA_DIR}/spider/tables.json 
 }
 
-run_inference spider dev
+# run_inference spider dev
 
-run_inference atis dev
-run_inference academic "1,2,3,4,5,6,7,8,9,0"
-# run_inference advising dev
-run_inference geoquery dev
-run_inference imdb "1,2,3,4,5,6,7,8,9,0"
-run_inference restaurants "1,2,3,4,5,6,7,8,9,0"
-run_inference scholar dev
-run_inference yelp "1,2,3,4,5,6,7,8,9,0"
+# run_inference atis dev
+# run_inference academic "1,2,3,4,5,6,7,8,9,0"
+# # run_inference advising dev
+# run_inference geoquery dev
+# run_inference imdb "1,2,3,4,5,6,7,8,9,0"
+# run_inference restaurants "9"
+# run_inference scholar dev
+# run_inference yelp "1,2,3,4,5,6,7,8,9,0"
